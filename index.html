@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>CRM Agente Lenti – PWA</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="manifest" href="./manifest.webmanifest">
@@ -10,6 +10,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <style>
+    :root{ --safe-b: env(safe-area-inset-bottom); }
     @media print { .no-print { display:none!important } body{ background:white!important } }
     body { background:#f8fafc; color:#0f172a; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
     .btn { padding:8px 12px; border-radius:12px; font-size:14px; border:1px solid #cbd5e1; background:#fff; cursor:pointer; }
@@ -20,10 +21,24 @@
     .card-h { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #f1f5f9; }
     .card-b { padding:16px; }
     .pill { border-radius:9999px; padding:2px 8px; border:1px solid #e2e8f0; font-size:12px; }
+    /* Mobile bottom nav */
+    #mnav { position:fixed; left:0; right:0; bottom:0; padding-bottom:calc(8px + var(--safe-b)); background:#fff; border-top:1px solid #e2e8f0; display:none; }
+    @media (max-width: 768px){ #mnav { display:block } .has-mnav { padding-bottom:76px } }
+    .mnav-btn{ flex:1; padding:8px 0; text-align:center; font-size:12px; color:#334155; }
+    .mnav-btn.active{ color:#2563eb; font-weight:600; }
   </style>
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app" class="has-mnav"></div>
+  <div id="mnav" class="no-print">
+    <div class="max-w-7xl mx-auto flex">
+      <button class="mnav-btn" data-route="dashboard">🏠<br>Home</button>
+      <button class="mnav-btn" data-route="clienti">👤<br>Clienti</button>
+      <button class="mnav-btn" data-route="visite">📝<br>Visite</button>
+      <button class="mnav-btn" data-route="fatturati">💶<br>Fatturato</button>
+      <button class="mnav-btn" data-route="agenda">🗺️<br>Agenda</button>
+    </div>
+  </div>
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -38,6 +53,7 @@
     const fmtEuro=n=>(Number(n)||0).toLocaleString('it-IT',{style:'currency',currency:'EUR'});
     const fmtDate=s=>s?new Date(s).toLocaleDateString('it-IT'):'';
     const today=()=>new Date().toISOString().slice(0,10);
+    const yyyymm=()=>new Date().toISOString().slice(0,7);
     const addDays=(iso,days)=>{const d=new Date(iso||today());d.setDate(d.getDate()+Number(days||0));return d.toISOString().slice(0,10)};
     const daysBetween=(a,b)=>{const A=new Date(a),B=new Date(b);return Math.round((B-A)/(1000*60*60*24))};
 
@@ -52,6 +68,8 @@
       ]);
       if(!lsGet('visits')) lsSet('visits',[]);
       if(!lsGet('promos')) lsSet('promos',[]);
+      if(!lsGet('sales')) lsSet('sales',[]); // {id, clientId, month: 'YYYY-MM', amount}
+      if(!lsGet('tours')) lsSet('tours',[]); // {id, date, name, stops:[{clientId}]}
     }
     ensureSeeds();
 
@@ -60,19 +78,26 @@
     const getClients=()=>lsGet('clients',[]), setClients=v=>lsSet('clients',v);
     const getVisits =()=>lsGet('visits',[]),  setVisits =v=>lsSet('visits',v);
     const getPromos =()=>lsGet('promos',[]),  setPromos =v=>lsSet('promos',v);
+    const getSales  =()=>lsGet('sales',[]),   setSales  =v=>lsSet('sales',v);
+    const getTours  =()=>lsGet('tours',[]),   setTours  =v=>lsSet('tours',v);
     const tierToFreq=(t,s=getSettings())=>t==='importante'?s.freqImportant:(t==='nuovo'?s.freqNew:s.freqStandard);
     const nextId=(series)=>{const y=new Date().getFullYear();const c=lsGet('counters',{});const key=series+':'+y;const num=Number(c[key]||0)+1;c[key]=num;lsSet('counters',c);return series+'-'+y+'-'+String(num).padStart(3,'0')};
 
     // Shell
     const app=document.getElementById('app'); let route='dashboard', query='';
     function navHTML(active){
-      const items=[['dashboard','Dashboard'],['clienti','Clienti'],['visite','Visite'],['promo','Promozioni'],['impostazioni','Impostazioni']];
+      const items=[['dashboard','Dashboard'],['clienti','Clienti'],['visite','Visite'],['promo','Promozioni'],['fatturati','Fatturati'],['agenda','Agenda'],['impostazioni','Impostazioni']];
       return items.map(([k,l]) => '<button data-route="'+k+'" class="w-full text-left px-3 py-2 rounded-xl text-sm '+(active===k?'bg-blue-50 text-blue-700 border border-blue-200':'hover:bg-slate-50')+'">'+l+'</button>').join('');
+    }
+    function setActiveMobile(){
+      document.querySelectorAll('#mnav [data-route]').forEach(b=>{
+        const r=b.getAttribute('data-route'); b.classList.toggle('active', r===route);
+      });
     }
     function layout(){
       app.innerHTML=[
         '<div class="min-h-screen flex">',
-          '<aside class="no-print w-64 shrink-0 h-screen sticky top-0 bg-white border-r p-4">',
+          '<aside class="no-print w-64 shrink-0 h-screen sticky top-0 bg-white border-r p-4 hidden md:block">',
             '<div class="mb-6"><div class="text-xl font-bold">CRM Agente Lenti</div><div class="text-xs text-slate-500">Triveneto</div></div>',
             '<nav class="space-y-1" id="nav">', navHTML(route), '</nav>',
           '</aside>',
@@ -88,17 +113,20 @@
         '</div>'
       ].join('');
       document.querySelectorAll('[data-route]').forEach(b=>b.addEventListener('click',()=>{route=b.getAttribute('data-route');layout();render()}));
+      document.querySelectorAll('#mnav [data-route]').forEach(b=>b.addEventListener('click',()=>{route=b.getAttribute('data-route');layout();render()}));
       document.getElementById('q').addEventListener('input',e=>{query=e.target.value||'';render()});
       document.getElementById('seed').addEventListener('click',()=>{localStorage.clear();ensureSeeds();alert('Dati demo caricati');render()});
+      setActiveMobile();
     }
-    function render(){const root=document.getElementById('view'); if(route==='dashboard')return renderDashboard(root); if(route==='clienti')return renderClienti(root,query); if(route==='visite')return renderVisite(root); if(route==='promo')return renderPromo(root); if(route==='impostazioni')return renderImpostazioni(root);}
+    function render(){const root=document.getElementById('view'); if(route==='dashboard')return renderDashboard(root); if(route==='clienti')return renderClienti(root,query); if(route==='visite')return renderVisite(root); if(route==='promo')return renderPromo(root); if(route==='fatturati')return renderFatturati(root); if(route==='agenda')return renderAgenda(root); if(route==='impostazioni')return renderImpostazioni(root); setActiveMobile();}
 
     // Views
     function renderDashboard(root){
-      const clients=getClients(), visits=getVisits(), promos=getPromos(), s=getSettings();
-      const month=new Date().toISOString().slice(0,7);
+      const clients=getClients(), visits=getVisits(), promos=getPromos(), s=getSettings(), sales=getSales();
+      const month=yyyymm();
       const visitsMonth=visits.filter(v=>(v.date||'').startsWith(month)).length;
       const coverage30=clients.length?Math.round(100*clients.filter(c=>c.lastVisitDate&&daysBetween(c.lastVisitDate,today())<=30).length/clients.length):0;
+      const totalMonth=sales.filter(x=>x.month===month).reduce((a,b)=>a+Number(b.amount||0),0);
       const alerts=[];
       clients.forEach(c=>{ if(c.prepagatoRenewal){ const d=daysBetween(today(),c.prepagatoRenewal); if(d>=0&&d<=7) alerts.push({t:'prepagato',txt:c.name+': prepagato in scadenza tra '+d+' giorni ('+fmtDate(c.prepagatoRenewal)+').'}); } });
       promos.forEach(p=>{ if(p.end){ const d=daysBetween(today(),p.end); if(d>=0&&d<=7) alerts.push({t:'promo',txt:'Promo "'+p.title+'" scade tra '+d+' giorni ('+fmtDate(p.end)+').'}); } });
@@ -110,7 +138,7 @@
         '<div class="grid grid-cols-1 lg:grid-cols-4 gap-4">',
           '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Clienti</div><div class="text-3xl font-bold">',clients.length,'</div></div></div>',
           '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Visite mese</div><div class="text-3xl font-bold">',visitsMonth,'</div></div></div>',
-          '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Copertura 30gg</div><div class="text-3xl font-bold">',coverage30,'%</div></div></div>',
+          '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Fatturato mese</div><div class="text-3xl font-bold">',fmtEuro(totalMonth),'</div></div></div>',
           '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm mb-2">Avvisi</div>',alertsHTML,'</div></div>',
         '</div>'
       ].join('');
@@ -273,6 +301,211 @@
       const f=root.querySelector('#fPromo'); f.addEventListener('submit',e=>{e.preventDefault(); const data=Object.fromEntries(new FormData(f).entries()); const provinces=[...root.querySelectorAll('#pProvs input[type=checkbox]:checked')].map(x=>x.value); const p={id:'P-'+Date.now(),...data,provinces,status:'attiva'}; promos.unshift(p); setPromos(promos); repaint(); f.reset(); });
     }
 
+    function renderFatturati(root){
+      const clients=getClients(); let sales=getSales(); const monthSel=yyyymm();
+      function sumByClientMonth(m){ const map={}; sales.filter(s=>s.month===m).forEach(s=>{ map[s.clientId]=(map[s.clientId]||0)+Number(s.amount||0); }); return map; }
+      function growth(clientId, m){ // compare to prev month
+        const [y,mm]=m.split('-').map(Number); const prev=(mm===1?(y-1):y)+'-'+String(mm===1?12:mm-1).padStart(2,'0');
+        const cur=sales.filter(s=>s.clientId===clientId && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0);
+        const prv=sales.filter(s=>s.clientId===clientId && s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
+        return {cur,prv,delta:cur-prv,ratio:prv?((cur-prv)/prv):null, prevMonth:prev};
+      }
+      function paint(){
+        const sums=sumByClientMonth(document.getElementById('m').value);
+        root.innerHTML=[
+          '<div class="space-y-4">',
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Inserisci fatturato mensile</h3></div>',
+            '<div class="card-b">',
+              '<form id="fSale" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+                '<select class="border rounded-xl px-3 py-2" name="clientId">',clients.map(c=>'<option value="'+c.id+'">'+c.name+'</option>').join(''),'</select>',
+                '<input class="border rounded-xl px-3 py-2" type="month" name="month" value="',yyyymm(),'">',
+                '<input class="border rounded-xl px-3 py-2" type="number" step="0.01" name="amount" placeholder="Importo €">',
+                '<div class="md:col-span-6 text-right"><button class="btn-primary">Aggiungi</button></div>',
+              '</form>',
+            '</div></div>',
+
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Riepilogo mese</h3><div class="flex items-center gap-2"><input id="m" type="month" value="',monthSel,'" class="border rounded-xl px-3 py-2"></div></div>',
+            '<div class="card-b overflow-auto">',
+              '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+              '<th class="text-left px-2 py-2">Cliente</th><th class="text-right px-2 py-2">Obiettivo</th><th class="text-right px-2 py-2">Fatturato</th><th class="text-left px-2 py-2">Avanzamento</th><th class="text-right px-2 py-2">Δ vs mese prec.</th>',
+              '</tr></thead><tbody id="rows">', clients.map(c=>{
+                const val=sums[c.id]||0; const goal=Number(c.goalMonthly||0); const pct=goal?Math.min(100,Math.round(100*val/goal)):null;
+                const g=growth(c.id, document.getElementById('m').value); const delta=g.delta; const sign=delta>0?'+':'';
+                const bar='<div class="w-40 h-2 bg-slate-200 rounded-full overflow-hidden"><div style="width:'+ (pct||0) +'%;height:100%" class="bg-blue-500"></div></div> ' + (pct!=null?(pct+'%'):'—');
+                return ['<tr class="border-b">',
+                    '<td class="px-2 py-2">',c.name,'</td>',
+                    '<td class="px-2 py-2 text-right">',goal?fmtEuro(goal):'-','</td>',
+                    '<td class="px-2 py-2 text-right">',fmtEuro(val),'</td>',
+                    '<td class="px-2 py-2">',bar,'</td>',
+                    '<td class="px-2 py-2 text-right ',(delta<0?'text-red-600':(delta>0?'text-emerald-600':'')),'">',sign,fmtEuro(delta),' (',g.prevMonth,')</td>',
+                  '</tr>'].join('');
+              }).join(''),'</tbody></table>',
+              '<div class="mt-3 text-right"><button id="exportCSV" class="btn">⬇️ Export CSV cliente×mese</button></div>',
+            '</div></div>',
+
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Trend</h3></div>',
+            '<div class="card-b text-sm text-slate-700">',
+              '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">',
+                '<div><div class="font-medium mb-2">Top crescita mese</div><ul id="topUp" class="list-disc pl-4"></ul></div>',
+                '<div><div class="font-medium mb-2">Rischio calo</div><ul id="topDown" class="list-disc pl-4"></ul></div>',
+              '</div>',
+            '</div></div>',
+          '</div>'
+        ].join('');
+
+        // rows already rendered
+        document.getElementById('m').addEventListener('change', paint);
+        document.getElementById('exportCSV').addEventListener('click', ()=>{
+          const rows=[['client_code','client_name','month','amount']];
+          const months=[...new Set(getSales().map(s=>s.month))].sort();
+          const mapName=Object.fromEntries(clients.map(c=>[c.id,c.name]));
+          const mapCode=Object.fromEntries(clients.map(c=>[c.id,c.code||'']));
+          getSales().forEach(s=>{ rows.push([mapCode[s.clientId]||'', mapName[s.clientId]||'', s.month, String(s.amount||0)]); });
+          const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace('"','""')+'"'):v).join(',')).join('\r\n');
+          const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clienti_mese.csv'; a.click();
+        });
+
+        // trend lists
+        const month=document.getElementById('m').value;
+        const deltas=clients.map(c=>{ const g=growth(c.id,month); return {id:c.id,name:c.name,delta:g.delta}; });
+        const up=[...deltas].sort((a,b)=>b.delta-a.delta).slice(0,5).filter(x=>x.delta>0);
+        const down=[...deltas].sort((a,b)=>a.delta-b.delta).slice(0,5).filter(x=>x.delta<0);
+        document.getElementById('topUp').innerHTML=up.map(x=>'<li>'+x.name+': +'+fmtEuro(x.delta)+'</li>').join('') || '<li>Nessuno</li>';
+        document.getElementById('topDown').innerHTML=down.map(x=>'<li>'+x.name+': '+fmtEuro(x.delta)+'</li>').join('') || '<li>Nessuno</li>';
+
+        // form add sale
+        const f=document.getElementById('fSale');
+        f.addEventListener('submit', e=>{
+          e.preventDefault();
+          const data=Object.fromEntries(new FormData(f).entries());
+          const rec={id:nextId('S'), clientId:data.clientId, month:data.month, amount:Number(data.amount||0)};
+          sales.unshift(rec); setSales(sales); paint();
+        });
+      }
+      paint();
+    }
+
+    function renderAgenda(root){
+      let tours=getTours(); const clients=getClients(); const s=getSettings();
+      const dueCandidates=(prov)=>{
+        const now=today();
+        return clients.filter(c=> (!prov || c.prov===prov) && (
+          !c.lastVisitDate || new Date(addDays(c.lastVisitDate,tierToFreq(c.tier||'standard',s))) <= new Date(addDays(now,7))
+        ));
+      };
+      function paint(){
+        root.innerHTML=[
+          '<div class="space-y-4">',
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Nuovo giro</h3></div>',
+              '<div class="card-b">',
+                '<form id="fTour" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+                  '<input class="border rounded-xl px-3 py-2" type="date" name="date" value="',today(),'">',
+                  '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" placeholder="Nome giro (es. Padova nord)">',
+                  '<select class="border rounded-xl px-3 py-2" name="prov"><option value="">Tutte le province</option>',Object.values(TRIVENETO).flat().map(p=>'<option>'+p+'</option>').join(''),'</select>',
+                  '<div class="md:col-span-6 text-right"><button class="btn-primary">Crea</button></div>',
+                '</form>',
+              '</div>',
+            '</div>',
+
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Giri salvati</h3></div>',
+              '<div class="card-b" id="toursList"></div>',
+            '</div>',
+          '</div>'
+        ].join('');
+
+        const list=root.querySelector('#toursList');
+        list.innerHTML = tours.length ? tours.map(t => {
+          const stops=(t.stops||[]).map((st,i)=> (i+1)+'. '+(clients.find(c=>c.id===st.clientId)||{}).name ).join('<br>');
+          return ['<div class="border rounded-xl p-3 mb-3">',
+            '<div class="flex items-center justify-between"><div><div class="font-medium">',t.name||('Giro '+t.date),'</div><div class="text-xs text-slate-500">',fmtDate(t.date),'</div></div>',
+            '<div class="space-x-2"><button class="btn" data-edit="',t.id,'">Modifica</button><button class="btn" data-ics="',t.id,'">Esporta ICS</button><button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',t.id,'">Elimina</button></div></div>',
+            '<div class="mt-2 text-sm">',stops||'—','</div>',
+          '</div>'].join('');
+        }).join('') : '<div class="text-sm text-slate-600">Nessun giro salvato</div>';
+
+        // handlers
+        list.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ const id=b.getAttribute('data-del'); if(confirm('Eliminare giro?')){ tours=tours.filter(x=>x.id!==id); setTours(tours); paint(); } }));
+        list.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{ const id=b.getAttribute('data-edit'); editTour(id); }));
+        list.querySelectorAll('[data-ics]').forEach(b=>b.addEventListener('click',()=>{ const id=b.getAttribute('data-ics'); exportTourICS(id); }));
+
+        const f=root.querySelector('#fTour'); f.addEventListener('submit', e=>{
+          e.preventDefault(); const data=Object.fromEntries(new FormData(f).entries());
+          const prov=data.prov||''; const candidates=dueCandidates(prov);
+          const t={id:nextId('T'), date:data.date, name:data.name||('Giro '+data.date), prov, stops:candidates.slice(0,8).map(c=>({clientId:c.id}))};
+          tours.unshift(t); setTours(tours); paint();
+          alert('Giro creato con clienti suggeriti (max 8). Puoi modificarlo.');
+        });
+      }
+
+      function editTour(id){
+        const t=(getTours().find(x=>x.id===id)); if(!t){ paint(); return; }
+        const prov=t.prov||''; const candidates=clients.filter(c=>!prov || c.prov===prov);
+        const root=document.getElementById('view');
+        root.innerHTML=[
+          '<div class="space-y-4">',
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Modifica giro — ',t.name,'</h3></div>',
+            '<div class="card-b grid grid-cols-1 md:grid-cols-2 gap-4">',
+              '<div>',
+                '<div class="font-medium mb-2">Clienti candidati ',prov?('('+prov+')'):'' ,'</div>',
+                '<div class="border rounded-xl p-2 h-80 overflow-auto" id="cand">', candidates.map(c=>'<div class="flex items-center justify-between border-b py-1"><div>'+c.name+' ('+(c.prov||'')+')</div><button class="btn" data-add="'+c.id+'">Aggiungi</button></div>').join('') ,'</div>',
+              '</div>',
+              '<div>',
+                '<div class="font-medium mb-2">Stop del giro (riordina)</div>',
+                '<div class="border rounded-xl p-2 h-80 overflow-auto" id="stops">', (t.stops||[]).map((s,i)=>{
+                  const name=(clients.find(c=>c.id===s.clientId)||{}).name||s.clientId;
+                  return '<div class="flex items-center justify-between border-b py-1"><div>'+str(i+1)+'. '+name+'</div><div class="space-x-1"><button class="btn" data-up="'+i+'">↑</button><button class="btn" data-down="'+i+'">↓</button><button class="btn text-red-600 border-red-300 hover:bg-red-50" data-rm="'+i+'">✕</button></div></div>';
+                }).join('') ,'</div>',
+              '</div>',
+            '</div>',
+            '<div class="card-b text-right">',
+              '<button class="btn" id="ok">Salva</button> ',
+              '<button class="btn" id="ics">Esporta ICS</button> ',
+              '<button class="btn-primary" id="finish">Segna visite effettuate</button>',
+            '</div>',
+          '</div>'
+        ].join('');
+
+        // handlers add/remove/reorder
+        const cand=document.getElementById('cand'); const stopsBox=document.getElementById('stops');
+        cand.querySelectorAll('[data-add]').forEach(b=>b.addEventListener('click',()=>{ const cid=b.getAttribute('data-add'); t.stops.push({clientId:cid}); setTours([...getTours().filter(x=>x.id!==id), t]); editTour(id); }));
+        stopsBox.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{ const i=Number(b.getAttribute('data-rm')); t.stops.splice(i,1); setTours([...getTours().filter(x=>x.id!==id), t]); editTour(id); }));
+        stopsBox.querySelectorAll('[data-up]').forEach(b=>b.addEventListener('click',()=>{ const i=Number(b.getAttribute('data-up')); if(i>0){ const tmp=t.stops[i-1]; t.stops[i-1]=t.stops[i]; t.stops[i]=tmp; setTours([...getTours().filter(x=>x.id!==id), t]); editTour(id);} }));
+        stopsBox.querySelectorAll('[data-down]').forEach(b=>b.addEventListener('click',()=>{ const i=Number(b.getAttribute('data-down')); if(i<t.stops.length-1){ const tmp=t.stops[i+1]; t.stops[i+1]=t.stops[i]; t.stops[i]=tmp; setTours([...getTours().filter(x=>x.id!==id), t]); editTour(id);} }));
+
+        document.getElementById('ok').addEventListener('click',()=>{ alert('Giro salvato'); renderAgenda(document.getElementById('view')); });
+        document.getElementById('ics').addEventListener('click',()=>{ exportTourICS(id); });
+        document.getElementById('finish').addEventListener('click',()=>{
+          const visits=getVisits(); const s=getSettings();
+          (t.stops||[]).forEach((st,idx)=>{
+            const v={id:nextId('V'), date:t.date, clientId:st.clientId, reason:'Giro: '+t.name, esito:'Positivo', notes:''};
+            visits.push(v);
+            const all=getClients(); const c=all.find(x=>x.id===st.clientId); if(c){ const next=addDays(t.date,tierToFreq(c.tier||'standard',s)); c.lastVisitDate=t.date; c.nextVisitDate=next; setClients(all); }
+          });
+          setVisits(visits); alert('Visite segnate e prossime date aggiornate'); renderAgenda(document.getElementById('view'));
+        });
+      }
+
+      function exportTourICS(id){
+        const t=getTours().find(x=>x.id===id); if(!t) return;
+        const clients=getClients();
+        const pad=n=>String(n).padStart(2,'0');
+        const toICS=d=>d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'T'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
+        const esc=s=>String(s||'').replace(/[\\,;\n]/g, m => (m==='\\'?'\\\\':m===','?'\\,':m===';'?'\\;':'\\n'));
+        let dt=new Date(t.date+'T09:00:00');
+        const events=[];
+        (t.stops||[]).forEach((st,idx)=>{
+          const c=clients.find(x=>x.id===st.clientId);
+          const start=new Date(dt); const end=new Date(dt.getTime()+45*60*1000); dt=new Date(dt.getTime()+60*60*1000); // 45' slot, 15' buffer
+          events.push(['BEGIN:VEVENT','UID:TOUR-'+t.id+'-'+idx,'DTSTAMP:'+toICS(new Date()),'DTSTART:'+toICS(start),'DTEND:'+toICS(end),'SUMMARY:'+esc('Visita: '+(c?.name||st.clientId)),'DESCRIPTION:'+esc('Giro: '+(t.name||'')),'END:VEVENT'].join('\r\n'));
+        });
+        const ics=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//CRM Lenti//IT','CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].join('\r\n');
+        const blob=new Blob([ics],{type:'text/calendar'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='giro_'+t.id+'.ics'; a.click();
+      }
+
+      function str(n){ return String(n); } // helper for template above
+      paint();
+    }
+
     function renderImpostazioni(root){
       let s=getSettings(); const promos=getPromos();
       root.innerHTML=[
@@ -307,9 +540,9 @@
       function val(sel){ return root.querySelector(sel).value; }
       root.querySelector('#saveA').addEventListener('click',()=>{ s={...s,agencyName:val('#agencyName'),agentName:val('#agentName'),baseCity:val('#baseCity')}; setSettings(s); alert('Salvato'); });
       root.querySelector('#saveF').addEventListener('click',()=>{ s={...s,freqStandard:Number(val('#freqStandard')||0),freqImportant:Number(val('#freqImportant')||0),freqNew:Number(val('#freqNew')||0)}; setSettings(s); alert('Frequenze aggiornate'); });
-      root.querySelector('#export').addEventListener('click',()=>{ const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos()}; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='crm-agente-backup.json'; a.click(); });
-      root.querySelector('#import').addEventListener('change',ev=>{ const file=ev.target.files?.[0]; if(!file) return; const fr=new FileReader(); fr.onload=()=>{ try{ const data=JSON.parse(fr.result); ['settings','clients','visits','promos'].forEach(k=>{ if(data[k]!=null) lsSet(k,data[k]); }); alert('Import eseguito. Ricarica la pagina.'); }catch{ alert('File non valido'); } }; fr.readAsText(file); });
-      root.querySelector('#wipe').addEventListener('click',()=>{ if(confirm('Sicuro?')){ ['settings','clients','visits','promos','counters'].forEach(k=>localStorage.removeItem(k)); location.reload(); } });
+      root.querySelector('#export').addEventListener('click',()=>{ const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),tours:getTours()}; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='crm-agente-backup.json'; a.click(); });
+      root.querySelector('#import').addEventListener('change',ev=>{ const file=ev.target.files?.[0]; if(!file) return; const fr=new FileReader(); fr.onload=()=>{ try{ const data=JSON.parse(fr.result); ['settings','clients','visits','promos','sales','tours'].forEach(k=>{ if(data[k]!=null) lsSet(k,data[k]); }); alert('Import eseguito. Ricarica la pagina.'); }catch{ alert('File non valido'); } }; fr.readAsText(file); });
+      root.querySelector('#wipe').addEventListener('click',()=>{ if(confirm('Sicuro?')){ ['settings','clients','visits','promos','sales','tours','counters'].forEach(k=>localStorage.removeItem(k)); location.reload(); } });
     }
 
     // Start
