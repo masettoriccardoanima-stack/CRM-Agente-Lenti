@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CRM Agente Lenti – PWA</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <style>
+    @media print { .no-print { display:none!important } body{ background:white!important } }
+    body { background:#f8fafc; color:#0f172a; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    .btn { padding:8px 12px; border-radius:12px; font-size:14px; border:1px solid #cbd5e1; background:#fff; cursor:pointer; }
+    .btn:hover { background:#f1f5f9; }
+    .btn-primary { padding:8px 12px; border-radius:12px; font-size:14px; background:#2563eb; color:#fff; border:1px solid #1d4ed8; cursor:pointer; }
+    .btn-primary:hover { background:#1d4ed8; }
+    .card { background:#fff; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 1px 1px rgba(0,0,0,.02); }
+    .card-h { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #f1f5f9; }
+    .card-b { padding:16px; }
+    .pill { border-radius:9999px; padding:2px 8px; border:1px solid #e2e8f0; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(console.warn);
+      });
+    }
+
+    // LocalStorage helpers
+    const lsGet=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}};
+    const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
+    const fmtEuro=n=>(Number(n)||0).toLocaleString('it-IT',{style:'currency',currency:'EUR'});
+    const fmtDate=s=>s?new Date(s).toLocaleDateString('it-IT'):'';
+    const today=()=>new Date().toISOString().slice(0,10);
+    const addDays=(iso,days)=>{const d=new Date(iso||today());d.setDate(d.getDate()+Number(days||0));return d.toISOString().slice(0,10)};
+    const daysBetween=(a,b)=>{const A=new Date(a),B=new Date(b);return Math.round((B-A)/(1000*60*60*24))};
+
+    // Seeds
+    const DEFAULT_SETTINGS={agencyName:'Marinelli Optodinamica – Agente',agentName:'Agente Demo',baseCity:'Padova',freqStandard:90,freqImportant:30,freqNew:21};
+    const TRIVENETO={ 'Veneto':['PD','VE','TV','VI','VR','RO','BL'], 'Trentino-Alto Adige/Südtirol':['TN','BZ'], 'Friuli Venezia Giulia':['TS','GO','PN','UD'] };
+    function ensureSeeds(){
+      if(!lsGet('settings')) lsSet('settings',DEFAULT_SETTINGS);
+      if(!lsGet('clients')?.length) lsSet('clients',[
+        {id:'C-001',code:'OTT-PD',name:'Ottica Prato della Valle',contact:'Giulia',phone:'049...',email:'pd@ottica.it',address:'Prato della Valle 1',city:'Padova',prov:'PD',region:'Veneto',status:'attivo',tier:'importante',goalMonthly:3000,prepagatoRenewal:'',lastVisitDate:'',nextVisitDate:'',notes:''},
+        {id:'C-002',code:'OTT-VE',name:'Ottica Rialto',contact:'Luca',phone:'041...',email:'ve@ottica.it',address:'San Polo 100',city:'Venezia',prov:'VE',region:'Veneto',status:'lead',tier:'nuovo',goalMonthly:1500,prepagatoRenewal:'',lastVisitDate:'',nextVisitDate:'',notes:'Interessati a progressive'}
+      ]);
+      if(!lsGet('visits')) lsSet('visits',[]);
+      if(!lsGet('promos')) lsSet('promos',[]);
+    }
+    ensureSeeds();
+
+    const getSettings=()=>lsGet('settings',DEFAULT_SETTINGS);
+    const setSettings=v=>lsSet('settings',v);
+    const getClients=()=>lsGet('clients',[]), setClients=v=>lsSet('clients',v);
+    const getVisits =()=>lsGet('visits',[]),  setVisits =v=>lsSet('visits',v);
+    const getPromos =()=>lsGet('promos',[]),  setPromos =v=>lsSet('promos',v);
+    const tierToFreq=(t,s=getSettings())=>t==='importante'?s.freqImportant:(t==='nuovo'?s.freqNew:s.freqStandard);
+    const nextId=(series)=>{const y=new Date().getFullYear();const c=lsGet('counters',{});const key=series+':'+y;const num=Number(c[key]||0)+1;c[key]=num;lsSet('counters',c);return series+'-'+y+'-'+String(num).padStart(3,'0')};
+
+    // Shell
+    const app=document.getElementById('app'); let route='dashboard', query='';
+    function navHTML(active){
+      const items=[['dashboard','Dashboard'],['clienti','Clienti'],['visite','Visite'],['promo','Promozioni'],['impostazioni','Impostazioni']];
+      return items.map(([k,l]) => '<button data-route="'+k+'" class="w-full text-left px-3 py-2 rounded-xl text-sm '+(active===k?'bg-blue-50 text-blue-700 border border-blue-200':'hover:bg-slate-50')+'">'+l+'</button>').join('');
+    }
+    function layout(){
+      app.innerHTML=[
+        '<div class="min-h-screen flex">',
+          '<aside class="no-print w-64 shrink-0 h-screen sticky top-0 bg-white border-r p-4">',
+            '<div class="mb-6"><div class="text-xl font-bold">CRM Agente Lenti</div><div class="text-xs text-slate-500">Triveneto</div></div>',
+            '<nav class="space-y-1" id="nav">', navHTML(route), '</nav>',
+          '</aside>',
+          '<main class="flex-1">',
+            '<div class="no-print sticky top-0 z-10 bg-slate-50/80 backdrop-blur px-4 py-3 border-b">',
+              '<div class="max-w-7xl mx-auto flex items-center gap-3">',
+                '<input id="q" placeholder="Cerca clienti, visite, promo…" value="'+(query||'')+'" class="w-full px-3 py-2 border rounded-xl text-sm border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500">',
+                '<button id="seed" class="btn">➕ Demo</button>',
+              '</div>',
+            '</div>',
+            '<div id="view" class="max-w-7xl mx-auto p-4 space-y-4"></div>',
+          '</main>',
+        '</div>'
+      ].join('');
+      document.querySelectorAll('[data-route]').forEach(b=>b.addEventListener('click',()=>{route=b.getAttribute('data-route');layout();render()}));
+      document.getElementById('q').addEventListener('input',e=>{query=e.target.value||'';render()});
+      document.getElementById('seed').addEventListener('click',()=>{localStorage.clear();ensureSeeds();alert('Dati demo caricati');render()});
+    }
+    function render(){const root=document.getElementById('view'); if(route==='dashboard')return renderDashboard(root); if(route==='clienti')return renderClienti(root,query); if(route==='visite')return renderVisite(root); if(route==='promo')return renderPromo(root); if(route==='impostazioni')return renderImpostazioni(root);}
+
+    // Views
+    function renderDashboard(root){
+      const clients=getClients(), visits=getVisits(), promos=getPromos(), s=getSettings();
+      const month=new Date().toISOString().slice(0,7);
+      const visitsMonth=visits.filter(v=>(v.date||'').startsWith(month)).length;
+      const coverage30=clients.length?Math.round(100*clients.filter(c=>c.lastVisitDate&&daysBetween(c.lastVisitDate,today())<=30).length/clients.length):0;
+      const alerts=[];
+      clients.forEach(c=>{ if(c.prepagatoRenewal){ const d=daysBetween(today(),c.prepagatoRenewal); if(d>=0&&d<=7) alerts.push({t:'prepagato',txt:c.name+': prepagato in scadenza tra '+d+' giorni ('+fmtDate(c.prepagatoRenewal)+').'}); } });
+      promos.forEach(p=>{ if(p.end){ const d=daysBetween(today(),p.end); if(d>=0&&d<=7) alerts.push({t:'promo',txt:'Promo "'+p.title+'" scade tra '+d+' giorni ('+fmtDate(p.end)+').'}); } });
+      clients.forEach(c=>{ if(!c.lastVisitDate) return; const due=addDays(c.lastVisitDate,tierToFreq(c.tier||'standard',s)); if(new Date(due)<new Date(today())) alerts.push({t:'visita',txt:c.name+': visita scaduta (ultima '+fmtDate(c.lastVisitDate)+').'}); });
+
+      const alertsHTML = alerts.length ? '<ul class="space-y-2 text-sm">'+alerts.map(a => '<li class="flex gap-2"><span class="pill '+(a.t==='promo'?'bg-amber-100 text-amber-700 border-amber-200':(a.t==='prepagato'?'bg-emerald-100 text-emerald-700 border-emerald-200':'bg-red-100 text-red-700 border-red-200'))+'">'+a.t+'</span><span>'+a.txt+'</span></li>').join('')+'</ul>' : '<div class="text-slate-500 text-sm">Nessun avviso</div>';
+
+      root.innerHTML=[
+        '<div class="grid grid-cols-1 lg:grid-cols-4 gap-4">',
+          '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Clienti</div><div class="text-3xl font-bold">',clients.length,'</div></div></div>',
+          '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Visite mese</div><div class="text-3xl font-bold">',visitsMonth,'</div></div></div>',
+          '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Copertura 30gg</div><div class="text-3xl font-bold">',coverage30,'%</div></div></div>',
+          '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm mb-2">Avvisi</div>',alertsHTML,'</div></div>',
+        '</div>'
+      ].join('');
+    }
+
+    function renderClienti(root,q){
+      let clients=getClients(); const s=getSettings();
+      function filtered(){return clients.filter(c=>!q||JSON.stringify(c).toLowerCase().includes((q||'').toLowerCase()))}
+      function row(c){ const freq=tierToFreq(c.tier||'standard',s); const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate,freq):''); const overdue=c.lastVisitDate&&new Date(addDays(c.lastVisitDate,freq))<new Date(today());
+        return ['<tr class="border-b align-top">',
+          '<td class="px-2 py-2 font-mono">',c.code||'', '</td>',
+          '<td class="px-2 py-2"><div class="font-medium">',c.name,'</div><div class="text-xs text-slate-500">',(c.contact||''),' · ',(c.phone||''),'</div></td>',
+          '<td class="px-2 py-2">',(c.city||''),' (',(c.prov||''),')</td>',
+          '<td class="px-2 py-2">',c.tier||'standard','</td>',
+          '<td class="px-2 py-2">',fmtDate(c.lastVisitDate),'</td>',
+          '<td class="px-2 py-2 ',(overdue?'text-red-600 font-semibold':''),'">',fmtDate(nextDefault),'</td>',
+          '<td class="px-2 py-2 text-right">', (c.goalMonthly?fmtEuro(c.goalMonthly):'-'),'</td>',
+          '<td class="px-2 py-2 text-right whitespace-nowrap">',
+            '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
+            '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
+          '</td>',
+        '</tr>'].join('');
+      }
+      function paint(){
+        const list=filtered();
+        root.innerHTML=[
+          '<div class="space-y-4">',
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Nuovo cliente</h3></div>',
+            '<div class="card-b">',
+              '<form id="fNew" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+                '<input class="border rounded-xl px-3 py-2" name="code" placeholder="Codice">',
+                '<input class="border rounded-xl px-3 py-2" name="name" placeholder="Nome negozio">',
+                '<input class="border rounded-xl px-3 py-2" name="contact" placeholder="Contatto">',
+                '<input class="border rounded-xl px-3 py-2" name="phone" placeholder="Telefono">',
+                '<input class="border rounded-xl px-3 py-2" name="email" placeholder="Email">',
+                '<input class="border rounded-xl px-3 py-2" name="address" placeholder="Indirizzo">',
+                '<input class="border rounded-xl px-3 py-2" name="city" placeholder="Città">',
+                '<select class="border rounded-xl px-3 py-2" name="prov">',Object.values(TRIVENETO).flat().map(p=>'<option>'+p+'</option>').join(''),'</select>',
+                '<select class="border rounded-xl px-3 py-2" name="region">',Object.keys(TRIVENETO).map(r=>'<option>'+r+'</option>').join(''),'</select>',
+                '<select class="border rounded-xl px-3 py-2" name="status">',['lead','attivo','sospeso','perso'].map(s=>'<option>'+s+'</option>').join(''),'</select>',
+                '<select class="border rounded-xl px-3 py-2" name="tier">',['nuovo','standard','importante'].map(t=>'<option>'+t+'</option>').join(''),'</select>',
+                '<input class="border rounded-xl px-3 py-2" type="number" step="0.01" name="goalMonthly" placeholder="Obiettivo € mensile">',
+                '<input class="border rounded-xl px-3 py-2" type="date" name="prepagatoRenewal" placeholder="Rinnovo prepagato">',
+                '<div class="md:col-span-6 text-right"><button class="btn-primary">Aggiungi</button></div>',
+              '</form>',
+            '</div></div>',
+
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Elenco clienti</h3></div>',
+            '<div class="card-b overflow-auto">',
+              '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+              '<th class="text-left px-2 py-2">Codice</th><th class="text-left px-2 py-2">Nome</th><th class="text-left px-2 py-2">Località</th>',
+              '<th class="text-left px-2 py-2">Tier</th><th class="text-left px-2 py-2">Ult. visita</th><th class="text-left px-2 py-2">Prossima</th>',
+              '<th class="text-right px-2 py-2">Obiettivo</th><th class="px-2 py-2"></th>',
+              '</tr></thead><tbody>', list.map(row).join('') ,'</tbody></table>',
+            '</div></div>',
+          '</div>'
+        ].join('');
+
+        const f=root.querySelector('#fNew'); f&&f.addEventListener('submit',e=>{e.preventDefault();const data=Object.fromEntries(new FormData(f).entries());const c={id:'C-'+Date.now(),...data,goalMonthly:Number(data.goalMonthly||0),lastVisitDate:'',nextVisitDate:'',notes:''}; clients.unshift(c); setClients(clients); paint();});
+        root.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{const id=b.getAttribute('data-del'); if(confirm('Eliminare cliente?')){ clients=clients.filter(x=>x.id!==id); setClients(clients); paint(); }}));
+        root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{const id=b.getAttribute('data-qv'); registerQuickVisit(id); clients=getClients(); paint(); }));
+      }
+      paint();
+    }
+
+    function registerQuickVisit(clientId){
+      const s=getSettings(); const clients=getClients(); const visits=getVisits();
+      const id=nextId('V'); const v={id,date:today(),clientId,reason:'Visita rapida',esito:'Positivo',notes:''};
+      visits.unshift(v); setVisits(visits);
+      const c=clients.find(x=>x.id===clientId);
+      if(c){ const next=addDays(today(),tierToFreq(c.tier||'standard',s)); c.lastVisitDate=today(); c.nextVisitDate=next; setClients([...clients]); }
+      alert('Visita registrata. Prossima consigliata aggiornata.');
+    }
+
+    function renderVisite(root){
+      const clients=getClients(); let visits=getVisits();
+      function rows(){ return visits.map(v => ['<tr class="border-b">',
+        '<td class="px-2 py-2 font-mono">',v.id,'</td>',
+        '<td class="px-2 py-2">',fmtDate(v.date),'</td>',
+        '<td class="px-2 py-2">',(clients.find(c=>c.id===v.clientId)||{}).name||'—','</td>',
+        '<td class="px-2 py-2">',v.reason,'</td>',
+        '<td class="px-2 py-2">',v.esito,'</td>',
+        '<td class="px-2 py-2">',fmtDate(v.nextDate),'</td>',
+        '<td class="px-2 py-2 text-right"><button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',v.id,'">Elimina</button></td>',
+      '</tr>'].join('')).join(''); }
+      root.innerHTML=[
+        '<div class="space-y-4">',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Registra visita</h3></div>',
+          '<div class="card-b">',
+            '<form id="fVisit" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+              '<input class="border rounded-xl px-3 py-2" type="date" name="date" value="',today(),'">',
+              '<select class="border rounded-xl px-3 py-2" name="clientId">',clients.map(c=>'<option value="'+c.id+'">'+c.name+'</option>').join(''),'</select>',
+              '<select class="border rounded-xl px-3 py-2" name="reason">',['Presentazione','Follow-up','Listino','Promo','Reclamo','Riscossione','Altro'].map(x=>'<option>'+x+'</option>').join(''),'</select>',
+              '<select class="border rounded-xl px-3 py-2" name="esito">',['Positivo','Neutro','Negativo'].map(x=>'<option>'+x+'</option>').join(''),'</select>',
+              '<input class="border rounded-xl px-3 py-2" type="date" name="nextDate" placeholder="Prossima">',
+              '<input class="border rounded-xl px-3 py-2" name="notes" placeholder="Note (2 bullet max)">',
+              '<div class="md:col-span-6 text-right"><button class="btn-primary">Salva</button></div>',
+            '</form>',
+          '</div></div>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Storico visite</h3></div>',
+          '<div class="card-b overflow-auto"><table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+          '<th class="text-left px-2 py-2">ID</th><th class="text-left px-2 py-2">Data</th><th class="text-left px-2 py-2">Cliente</th><th class="text-left px-2 py-2">Motivo</th><th class="text-left px-2 py-2">Esito</th><th class="text-left px-2 py-2">Prossima</th><th class="px-2 py-2"></th>',
+          '</tr></thead><tbody id="tbody">',rows(),'</tbody></table></div>',
+        '</div>'
+      ].join('');
+
+      function repaint(){ document.getElementById('tbody').innerHTML = rows(); document.querySelectorAll('[data-del]').forEach(btn=>btn.addEventListener('click',()=>{ const id=btn.getAttribute('data-del'); if(confirm('Eliminare visita?')){ visits=visits.filter(x=>x.id!==id); setVisits(visits); repaint(); }})); }
+      repaint();
+      const f=root.querySelector('#fVisit'); f.addEventListener('submit',e=>{e.preventDefault(); const data=Object.fromEntries(new FormData(f).entries()); const id=nextId('V'); const v={id,...data}; visits.unshift(v); setVisits(visits);
+        const s=getSettings(); const all=getClients(); const c=all.find(x=>x.id===data.clientId); if(c){ const next=data.nextDate||addDays(data.date,tierToFreq(c.tier||'standard',s)); c.lastVisitDate=data.date; c.nextVisitDate=next; setClients(all); } repaint(); f.reset(); });
+    }
+
+    function renderPromo(root){
+      let promos=getPromos();
+      function rows(){ return promos.sort((a,b)=>(b.start||'').localeCompare(a.start||'')).map(p=>['<tr class="border-b align-top">',
+        '<td class="px-2 py-2"><div class="font-medium">',p.title,'</div><div class="text-xs text-slate-600">',(p.desc||''),'</div></td>',
+        '<td class="px-2 py-2">',fmtDate(p.start),' – ',fmtDate(p.end),'</td>',
+        '<td class="px-2 py-2">',(p.provinces||[]).join(', ')||'—','</td>',
+        '<td class="px-2 py-2 text-right"><button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',p.id,'">Elimina</button></td>',
+        '<td class="px-2 py-2 text-right"><button class="btn" data-ics="',p.id,'">Promemoria scadenza</button></td>',
+      '</tr>'].join('')).join(''); }
+      root.innerHTML=[
+        '<div class="space-y-4">',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Nuova promozione</h3></div>',
+            '<div class="card-b">',
+              '<form id="fPromo" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+                '<input class="border rounded-xl px-3 py-2" name="title" placeholder="Titolo">',
+                '<input class="border rounded-xl px-3 py-2" type="date" name="start" value="',today(),'">',
+                '<input class="border rounded-xl px-3 py-2" type="date" name="end">',
+                '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="desc" placeholder="Descrizione/condizioni"></textarea></div>',
+                '<div class="md:col-span-6"><div class="text-sm font-medium mb-2">Province target</div><div class="flex flex-wrap gap-2" id="pProvs">',
+                  Object.values(TRIVENETO).flat().map(p=>'<label class="px-2 py-1 border rounded-xl text-sm cursor-pointer"><input type="checkbox" value="'+p+'" class="mr-1">'+p+'</label>').join(''),
+                '</div></div>',
+                '<div class="md:col-span-6 text-right"><button class="btn-primary">Salva promo</button></div>',
+              '</form>',
+            '</div>',
+          '</div>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Promozioni attive & storiche</h3></div>',
+            '<div class="card-b overflow-auto"><table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+            '<th class="text-left px-2 py-2">Titolo</th><th class="text-left px-2 py-2">Periodo</th><th class="text-left px-2 py-2">Province</th><th class="px-2 py-2"></th><th class="px-2 py-2">Calendario</th>',
+            '</tr></thead><tbody id="rows">',rows(),'</tbody></table></div>',
+          '</div>',
+        '</div>'
+      ].join('');
+      function repaint(){ const tbody=document.getElementById('rows'); tbody.innerHTML=rows();
+        tbody.querySelectorAll('[data-del]').forEach(btn=>btn.addEventListener('click',()=>{ const id=btn.getAttribute('data-del'); if(confirm('Eliminare promo?')){ promos=promos.filter(x=>x.id!==id); setPromos(promos); repaint(); } }));
+        tbody.querySelectorAll('[data-ics]').forEach(btn=>btn.addEventListener('click',()=>{
+          const id=btn.getAttribute('data-ics'); const p=promos.find(x=>x.id===id); if(!p||!p.end){ alert('Imposta la data di fine'); return; }
+          const end=new Date(p.end); const start=new Date(end.getTime()-7*24*60*60*1000);
+          const pad=n=>String(n).padStart(2,'0');
+          const toICS=d=>d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'T'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
+          const esc=s=>String(s||'').replace(/[\\,;\n]/g, m => (m==='\\'?'\\\\':m===','?'\\,':m===';'?'\\;':'\\n'));
+          const ics=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//CRM Lenti//IT','CALSCALE:GREGORIAN','BEGIN:VEVENT',
+            'UID:PROMO-'+id,'DTSTAMP:'+toICS(new Date()),'DTSTART:'+toICS(start),'DTEND:'+toICS(new Date(start.getTime()+60*60*1000)),
+            'SUMMARY:'+esc('PROMO in scadenza: '+p.title),'DESCRIPTION:'+esc(p.desc||''),'END:VEVENT','END:VCALENDAR'].join('\r\n');
+          const blob=new Blob([ics],{type:'text/calendar'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='promo_'+id+'_promemoria.ics'; a.click();
+        }));
+      }
+      repaint();
+      const f=root.querySelector('#fPromo'); f.addEventListener('submit',e=>{e.preventDefault(); const data=Object.fromEntries(new FormData(f).entries()); const provinces=[...root.querySelectorAll('#pProvs input[type=checkbox]:checked')].map(x=>x.value); const p={id:'P-'+Date.now(),...data,provinces,status:'attiva'}; promos.unshift(p); setPromos(promos); repaint(); f.reset(); });
+    }
+
+    function renderImpostazioni(root){
+      let s=getSettings(); const promos=getPromos();
+      root.innerHTML=[
+        '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Dati agenzia</h3></div>',
+            '<div class="card-b grid grid-cols-1 gap-3">',
+              '<input class="border rounded-xl px-3 py-2" id="agencyName" value="',(s.agencyName||''),'" placeholder="Nome Agenzia">',
+              '<input class="border rounded-xl px-3 py-2" id="agentName" value="',(s.agentName||''),'" placeholder="Nome Agente">',
+              '<input class="border rounded-xl px-3 py-2" id="baseCity" value="',(s.baseCity||''),'" placeholder="Città di partenza (base)">',
+              '<div class="text-right"><button id="saveA" class="btn-primary">Salva</button></div>',
+            '</div></div>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Frequenza visite (giorni)</h3></div>',
+            '<div class="card-b grid grid-cols-1 md:grid-cols-3 gap-3">',
+              '<label class="text-sm">Standard<input class="border rounded-xl px-3 py-2" type="number" id="freqStandard" value="',(s.freqStandard||90),'" ></label>',
+              '<label class="text-sm">Importante<input class="border rounded-xl px-3 py-2" type="number" id="freqImportant" value="',(s.freqImportant||30),'" ></label>',
+              '<label class="text-sm">Nuovo<input class="border rounded-xl px-3 py-2" type="number" id="freqNew" value="',(s.freqNew||21),'" ></label>',
+            '</div>',
+            '<div class="card-b pt-0 text-right"><button id="saveF" class="btn-primary">Salva frequenze</button></div>',
+          '</div>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Backup & Import</h3></div>',
+            '<div class="card-b flex flex-col gap-2">',
+              '<button id="export" class="btn-primary">Scarica backup JSON</button>',
+              '<label class="block"><span class="text-sm text-slate-600">Importa backup JSON</span><input type="file" accept="application/json" id="import" class="block mt-1"></label>',
+              '<button id="wipe" class="btn border-red-300 text-red-600 hover:bg-red-50">Svuota tutti i dati</button>',
+            '</div>',
+          '</div>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Promozioni (shortcut)</h3></div>',
+            '<div class="card-b text-sm text-slate-600">Prossime scadenze: ', (promos.filter(p=>p.end).sort((a,b)=>a.end.localeCompare(b.end)).slice(0,3).map(p=> p.title+' ('+fmtDate(p.end)+')').join(', ') || '—') ,'</div>',
+          '</div>',
+        '</div>'
+      ].join('');
+      function val(sel){ return root.querySelector(sel).value; }
+      root.querySelector('#saveA').addEventListener('click',()=>{ s={...s,agencyName:val('#agencyName'),agentName:val('#agentName'),baseCity:val('#baseCity')}; setSettings(s); alert('Salvato'); });
+      root.querySelector('#saveF').addEventListener('click',()=>{ s={...s,freqStandard:Number(val('#freqStandard')||0),freqImportant:Number(val('#freqImportant')||0),freqNew:Number(val('#freqNew')||0)}; setSettings(s); alert('Frequenze aggiornate'); });
+      root.querySelector('#export').addEventListener('click',()=>{ const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos()}; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='crm-agente-backup.json'; a.click(); });
+      root.querySelector('#import').addEventListener('change',ev=>{ const file=ev.target.files?.[0]; if(!file) return; const fr=new FileReader(); fr.onload=()=>{ try{ const data=JSON.parse(fr.result); ['settings','clients','visits','promos'].forEach(k=>{ if(data[k]!=null) lsSet(k,data[k]); }); alert('Import eseguito. Ricarica la pagina.'); }catch{ alert('File non valido'); } }; fr.readAsText(file); });
+      root.querySelector('#wipe').addEventListener('click',()=>{ if(confirm('Sicuro?')){ ['settings','clients','visits','promos','counters'].forEach(k=>localStorage.removeItem(k)); location.reload(); } });
+    }
+
+    // Start
+    layout(); render();
+  </script>
+</body>
+</html>
