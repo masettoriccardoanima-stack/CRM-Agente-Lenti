@@ -1,5 +1,5 @@
-// sw.js (v5)
-const CACHE_NAME = 'crm-lenti-pwa-single-v5';
+// sw.js (v6)
+const CACHE_NAME = 'crm-lenti-pwa-single-v6';
 const FILES_TO_CACHE = [
   './index.html',
   './manifest.webmanifest',
