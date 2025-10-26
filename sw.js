@@ -1,5 +1,5 @@
-// sw.js (v6)
-const CACHE_NAME = 'crm-lenti-pwa-single-v6';
+// sw.js (v6.1)
+const CACHE_NAME = 'crm-lenti-pwa-single-v6_1';
 const FILES_TO_CACHE = [
   './index.html',
   './manifest.webmanifest',
@@ -17,6 +17,11 @@ self.addEventListener('activate', (evt) => {
   self.clients.claim();
 });
 self.addEventListener('fetch', (evt) => {
+  const url = new URL(evt.request.url);
+  if (url.origin !== self.location.origin) {
+    evt.respondWith(fetch(evt.request));
+    return;
+  }
   evt.respondWith(
     fetch(evt.request).then(res => {
       const copy = res.clone();
