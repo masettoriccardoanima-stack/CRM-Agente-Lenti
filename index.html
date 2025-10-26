@@ -78,6 +78,8 @@
       ]);
       if(!lsGet('visits')) lsSet('visits',[]);
       if(!lsGet('promos')) lsSet('promos',[]);
+      if(!lsGet('cPromos')) lsSet('cPromos',[]);
+      if(!lsGet('sync')) lsSet('sync',{lastSyncISO:''});
       if(!lsGet('sales')) lsSet('sales',[]);
       if(!lsGet('salesW')) lsSet('salesW',[]);
       if(!lsGet('tours')) lsSet('tours',[]);
@@ -95,6 +97,14 @@
     const getSalesW =()=>lsGet('salesW',[]),  setSalesW =v=>lsSet('salesW',v);
     const getTours  =()=>lsGet('tours',[]),   setTours  =v=>lsSet('tours',v);
     const getFB =()=>lsGet('firebase',{}),    setFB =v=>lsSet('firebase',v);
+    
+    // Catalogo promozioni = getPromos() (già esistente)
+    // Promozioni assegnate ai singoli clienti
+    const getCPromos=()=>lsGet('cPromos',[]), setCPromos=v=>lsSet('cPromos',v);
+
+    // Stato sync cloud (timestamp ultimo upload/download locale)
+    const getSync=()=>lsGet('sync',{lastSyncISO:''}), setSync=v=>lsSet('sync',v);
+
 
     const tierToFreq=(t,s=getSettings())=>t==='importante'?s.freqImportant:(t==='nuovo'?s.freqNew:s.freqStandard);
     const nextId=(series)=>{const y=new Date().getFullYear();const c=lsGet('counters',{});const key=series+':'+y;const num=Number(c[key]||0)+1;c[key]=num;lsSet('counters',c);return series+'-'+y+'-'+String(num).padStart(3,'0')};
@@ -138,51 +148,121 @@
       return map;
     }
     function renderDashboard(root){
-      const clients=getClients(), visits=getVisits(), promos=getPromos(), sales=getSales();
-      const month=yyyymm();
-      const visitsMonth=visits.filter(v=>(v.date||'').startsWith(month)).length;
-      const totalMonth=sales.filter(x=>x.month===month).reduce((a,b)=>a+Number(b.amount||0),0);
-      const alerts=[];
-      const lastSale=lastSaleDateByClient();
-      clients.forEach(c=>{
-        if(c.prepagatoRenewal){ const d=daysBetween(today(),c.prepagatoRenewal); if(d>=0&&d<=7) alerts.push({t:'carnet',txt:c.name+': carnet/prepagato in scadenza ('+fmtDate(c.prepagatoRenewal)+')'}); }
-        const l=lastSale[c.id]; if(!l || daysBetween(l, today())>21) alerts.push({t:'fatturato', txt:c.name+': nessun fatturato negli ultimi 21 giorni'});
-      });
-      promos.forEach(p=>{ if(p.end){ const d=daysBetween(today(),p.end); if(d>=0&&d<=7) alerts.push({t:'promo',txt:'Promo \"'+p.title+'\" in scadenza ('+fmtDate(p.end)+')'}); } });
-      const alertsHTML = alerts.length ? '<ul class=\"space-y-2 text-sm\">'+alerts.map(a => '<li class=\"flex gap-2\"><span class=\"pill '+(a.t==='promo'?'bg-amber-100 text-amber-700 border-amber-200':(a.t==='carnet'?'bg-emerald-100 text-emerald-700 border-emerald-200':'bg-red-100 text-red-700 border-red-200'))+'\">'+a.t+'</span><span>'+a.txt+'</span></li>').join('')+'</ul>' : '<div class=\"text-slate-500 text-sm\">Nessun avviso</div>';
+  const clients=getClients(), visits=getVisits(), promoCatalog=getPromos(), sales=getSales();
+  const month=yyyymm();
 
-      root.innerHTML=[
-        '<div class=\"grid grid-cols-1 lg:grid-cols-4 gap-4\">',
-          '<div class=\"card\"><div class=\"card-b\"><div class=\"text-slate-500 text-sm\">Clienti</div><div class=\"text-3xl font-bold\">',clients.length,'</div></div></div>',
-          '<div class=\"card\"><div class=\"card-b\"><div class=\"text-slate-500 text-sm\">Visite mese</div><div class=\"text-3xl font-bold\">',visitsMonth,'</div></div></div>',
-          '<div class=\"card\"><div class=\"card-b\"><div class=\"text-slate-500 text-sm\">Fatturato mese</div><div class=\"text-3xl font-bold\">',fmtEuro(totalMonth),'</div></div></div>',
-          '<div class=\"card\"><div class=\"card-b\"><div class=\"text-slate-500 text-sm mb-2\">Avvisi</div>',alertsHTML,'</div></div>',
-        '</div>'
-      ].join('');
+  // KPI
+  const visitsMonth=visits.filter(v=>(v.date||'').startsWith(month)).length;
+  const totalMonth=sales.filter(x=>x.month===month).reduce((a,b)=>a+Number(b.amount||0),0);
+
+  // Alert scadenze per cliente (da cPromos)
+  const cPromos=getCPromos();
+  const alerts=[];
+  cPromos.forEach(cp=>{
+    if(cp.end){
+      const d=daysBetween(today(), cp.end);
+      if(d>=0 && d<=7){
+        const cli=clients.find(c=>c.id===cp.clientId);
+        alerts.push({t:'promo',txt:(cli?cli.name:'Cliente')+': promo "'+cp.title+'" in scadenza ('+fmtDate(cp.end)+')'});
+      }
     }
+  });
+
+  // Alert clienti senza fatturato >21gg (come richiesto)
+  const lastSale=lastSaleDateByClient();
+  clients.forEach(c=>{
+    const l=lastSale[c.id];
+    if(!l || daysBetween(l, today())>21){
+      alerts.push({t:'fatturato', txt:c.name+': nessun fatturato negli ultimi 21 giorni'});
+    }
+  });
+
+  const alertsHTML = alerts.length
+    ? '<ul class="space-y-2 text-sm">'+alerts.map(a =>
+        '<li class="flex gap-2"><span class="pill '+(a.t==='promo'?'bg-amber-100 text-amber-700 border-amber-200':'bg-red-100 text-red-700 border-red-200')+'">'+a.t+'</span><span>'+a.txt+'</span></li>'
+      ).join('')+'</ul>'
+    : '<div class="text-slate-500 text-sm">Nessun avviso</div>';
+
+  // Top 10 da visitare (più "urgenti" in base a ultima visita e frequenza tier)
+  const s=getSettings();
+  const dueScore = (c)=>{
+    const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate, tierToFreq(c.tier||'standard',s)):'');
+    const daysLate = nextDefault ? Math.max(0, daysBetween(nextDefault, today())) : 9999;
+    const weight = c.tier==='importante'?2:(c.tier==='nuovo'?1.5:1);
+    return daysLate*weight;
+  };
+  const top10 = [...clients].sort((a,b)=>dueScore(b)-dueScore(a)).slice(0,10);
+
+  const lastSyncBadge = getSync().lastSyncISO
+    ? '<span class="pill bg-emerald-50 text-emerald-700 border-emerald-200">Cloud: '+new Date(getSync().lastSyncISO).toLocaleString('it-IT')+'</span>'
+    : '<span class="pill bg-slate-50 text-slate-600 border-slate-200">Cloud: mai</span>';
+
+  root.innerHTML=[
+    '<div class="grid grid-cols-1 lg:grid-cols-4 gap-4">',
+      '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Clienti</div><div class="text-3xl font-bold">',clients.length,'</div></div></div>',
+      '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Visite mese</div><div class="text-3xl font-bold">',visitsMonth,'</div></div></div>',
+      '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Fatturato mese</div><div class="text-3xl font-bold">',fmtEuro(totalMonth),'</div></div></div>',
+      '<div class="card"><div class="card-b flex items-center justify-between"><div><div class="text-slate-500 text-sm mb-2">Stato cloud</div>',lastSyncBadge,'</div><button id="quickSync" class="btn">Sync rapido</button></div></div>',
+    '</div>',
+    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">',
+      '<div class="card"><div class="card-h"><h3 class="font-semibold">Avvisi</h3></div><div class="card-b">',alertsHTML,'</div></div>',
+      '<div class="card"><div class="card-h"><h3 class="font-semibold">Top 10 da visitare</h3></div><div class="card-b">',
+        top10.length?('<ul class="text-sm space-y-2">'+top10.map(c=>'<li><span class="font-medium">'+c.name+'</span> — tier: '+(c.tier||'standard')+' · prossima: '+(c.nextVisitDate?fmtDate(c.nextVisitDate):'–')+' <button class="btn" data-qv="'+c.id+'">+ visita rapida</button></li>').join('')+'</ul>'):'<div class="text-slate-500 text-sm">—</div>',
+      '</div></div>',
+    '</div>'
+  ].join('');
+
+  // quick visit buttons
+  root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{ registerQuickVisit(b.getAttribute('data-qv')); renderDashboard(root); }));
+
+  // quick sync = richiama upload (se app connessa) al volo
+  const qs=root.querySelector('#quickSync');
+  if(qs) qs.addEventListener('click', async ()=>{
+    if(!window._fbDB){ alert('Connettiti prima in Impostazioni → Sincronizzazione'); return; }
+    const fb=getFB(); const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
+    const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
+    await docRef.set(payload);
+    setSync({lastSyncISO:new Date().toISOString()});
+    alert('Sync ok');
+    renderDashboard(root);
+  });
+}
+
 
     // ——— Clienti ———
     function renderClienti(root,q){
       let clients=getClients(); const s=getSettings();
       function filtered(){return clients.filter(c=>!q||JSON.stringify(c).toLowerCase().includes((q||'').toLowerCase()))}
-      function row(c){ const freq=tierToFreq(c.tier||'standard',s); const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate,freq):''); const overdue=c.lastVisitDate&&new Date(addDays(c.lastVisitDate,freq))<new Date(today());
-        return ['<tr class=\"border-b align-top\">',
-          '<td class=\"px-2 py-2 font-mono\">',c.code||'', '</td>',
-          '<td class=\"px-2 py-2\"><div class=\"font-medium\">',c.name,'</div><div class=\"text-xs text-slate-500\">',(c.contact||''),' · ',(c.phone||''),'</div>',
-          '<div class=\"text-xs text-slate-500\">',c.address||'', '</div>',
-          '</td>',
-          '<td class=\"px-2 py-2\">',(c.city||''),' (',(c.prov||''),')</td>',
-          '<td class=\"px-2 py-2\">',c.tier||'standard','</td>',
-          '<td class=\"px-2 py-2\">',fmtDate(c.lastVisitDate),'</td>',
-          '<td class=\"px-2 py-2 ',(overdue?'text-red-600 font-semibold':''),'\">',fmtDate(nextDefault),'</td>',
-          '<td class=\"px-2 py-2 text-right\">', (c.goalMonthly?fmtEuro(c.goalMonthly):'-'),'</td>',
-          '<td class=\"px-2 py-2 text-right whitespace-nowrap\">',
-            '<button class=\"btn\" data-qv=\"',c.id,'\">+ Visita</button> ',
-            '<button class=\"btn\" data-notes=\"',c.id,'\">Note</button> ',
-            '<button class=\"btn text-red-600 border-red-300 hover:bg-red-50\" data-del=\"',c.id,'\">Elimina</button>',
-          '</td>',
-        '</tr>'].join('');
+      function row(c){
+      const s=getSettings();
+      const freq=tierToFreq(c.tier||'standard',s);
+      const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate,freq):'');
+      const overdue=c.lastVisitDate&&new Date(addDays(c.lastVisitDate,freq))<new Date(today());
+    // Stato fatturato
+      const lastSale=lastSaleDateByClient()[c.id];
+      const over21 = !lastSale || daysBetween(lastSale, today())>21;
+      const statoHTML = over21
+        ? '<span class="pill bg-red-50 text-red-700 border-red-200">no fatt. &gt;21g</span>'
+        : '<span class="pill bg-emerald-50 text-emerald-700 border-emerald-200">ok</span>';
+
+      return ['<tr class="border-b align-top">',
+        '<td class="px-2 py-2 font-mono">',c.code||'', '</td>',
+        '<td class="px-2 py-2"><div class="font-medium">',c.name,'</div><div class="text-xs text-slate-500">',(c.contact||''),' · ',(c.phone||''),'</div><div class="text-xs text-slate-500">',c.address||'', '</div></td>',
+        '<td class="px-2 py-2">',(c.city||''),' (',(c.prov||''),')</td>',
+        '<td class="px-2 py-2">',c.tier||'standard','</td>',
+        '<td class="px-2 py-2">',fmtDate(c.lastVisitDate),'</td>',
+        '<td class="px-2 py-2 ',(overdue?'text-red-600 font-semibold':''),'">',fmtDate(nextDefault),'</td>',
+        '<td class="px-2 py-2">',statoHTML,'</td>',
+        '<td class="px-2 py-2 text-right">', (c.goalMonthly?fmtEuro(c.goalMonthly):'-'),'</td>',
+        '<td class="px-2 py-2 text-right whitespace-nowrap">',
+          '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
+          '<button class="btn" data-notes="',c.id,'">Note</button> ',
+          '<button class="btn" data-promo="',c.id,'">Promo</button> ',
+          '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
+        '</td>',
+      '</tr>'].join('');
       }
+
       function paint(){
         const list=filtered();
         root.innerHTML=[
@@ -206,14 +286,26 @@
                 '<input class=\"border rounded-xl px-3 py-2\" type=\"date\" name=\"prepagatoRenewal\" placeholder=\"Rinnovo carnet/prepagato\">',
                 '<div class=\"md:col-span-6\"><textarea class=\"border rounded-xl px-3 py-2 w-full\" name=\"notes\" placeholder=\"Note cliente\"></textarea></div>',
                 '<div class=\"md:col-span-6 text-right\"><button class=\"btn-primary\">Aggiungi</button></div>',
-              '</form>',
+              '</form>',            
             '</div></div>',
+            '<div class="card">',
+              '<div class="card-h"><h3 class="font-semibold">Import clienti (CSV)</h3></div>',
+              '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
+                '<input id="fileClients" type="file" accept=".csv,text/csv" class="md:col-span-3">',
+                '<div class="md:col-span-3 text-right">',
+                  '<button id="importClients" class="btn">Importa</button>',
+                '</div>',
+              '<div class="md:col-span-6 text-xs text-slate-500">',
+              'Riconosce intestazioni comuni: Ragione sociale/Cliente, P.IVA, Codice, Indirizzo, Città, CAP, Provincia, Regione, Telefono, Email, Contatto, Tier, Stato, Obiettivo, Rinnovo (YYYY-MM-DD).',
+            '</div>',
+            '</div>',
+            '</div>',
             '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Elenco clienti</h3></div>',
             '<div class=\"card-b overflow-auto\">',
               '<table class=\"min-w-full text-sm\"><thead class=\"bg-slate-100 text-slate-600\"><tr>',
               '<th class=\"text-left px-2 py-2\">Codice</th><th class=\"text-left px-2 py-2\">Cliente</th><th class=\"text-left px-2 py-2\">Località</th>',
-              '<th class=\"text-left px-2 py-2\">Tier</th><th class=\"text-left px-2 py-2\">Ult. visita</th><th class=\"text-left px-2 py-2\">Prossima</th>',
-              '<th class=\"text-right px-2 py-2\">Obiettivo</th><th class=\"px-2 py-2\"></th>',
+              '<th class="text-left px-2 py-2">Tier</th><th class="text-left px-2 py-2">Ult. visita</th><th class="text-left px-2 py-2">Prossima</th><th class="text-left px-2 py-2">Stato</th>',
+              '<th class="text-right px-2 py-2">Obiettivo</th><th class="px-2 py-2"></th>',
               '</tr></thead><tbody>', list.map(row).join('') ,'</tbody></table>',
             '</div></div>',
           '</div>'
@@ -225,6 +317,67 @@
         root.querySelectorAll('[data-notes]').forEach(b=>b.addEventListener('click',()=>{const id=b.getAttribute('data-notes'); const all=getClients(); const c=all.find(x=>x.id===id); const n=prompt('Note cliente:', c.notes||''); if(n!=null){ c.notes=n; setClients(all); alert('Note salvate'); }}));
       }
       paint();
+      root.querySelectorAll('[data-promo]').forEach(b=>b.addEventListener('click',()=>{
+        window._promoClientPreselect = b.getAttribute('data-promo'); // id cliente
+        route='promo';
+      render();
+      }));      
+    const btnIC = root.querySelector('#importClients');
+      if(btnIC){
+        btnIC.addEventListener('click', async ()=>{
+        const f = root.querySelector('#fileClients').files?.[0];
+        if(!f){ alert('Seleziona un CSV'); return; }
+
+        // ri-usa il parser già presente in Fatturati
+        const text = await f.text();
+        const tab = parseCSV(text);
+        const H = tab.header.map(h=>h.trim().toLowerCase());
+        
+        const pick = (row, keys) => {
+          for(const k of keys){
+          const i = H.indexOf(k);
+          if(i>=0 && row[i]!=null) return String(row[i]).trim();
+        }
+        return '';
+      };
+
+      let list = getClients(); let added=0;
+      tab.rows.forEach(r=>{
+        const name = pick(r,['ragione sociale','cliente','nome']);
+        if (!name) return;
+        const code = pick(r,['codice','codice cliente']);
+        const piva = pick(r,['p.iva','piva','partita iva']);
+        const address = pick(r,['indirizzo','address']);
+        const city = pick(r,['città','citta','city']);
+        const cap = pick(r,['cap','zip']);
+        const prov = pick(r,['provincia','prov']);
+        const region = pick(r,['regione','region']);
+        const phone = pick(r,['telefono','phone']);
+        const email = pick(r,['email','mail']);
+        const contact = pick(r,['contatto','referente']);
+        const tier = (pick(r,['tier','classe','segmento'])||'').toLowerCase() || 'standard';
+        const status = (pick(r,['stato','status'])||'attivo').toLowerCase();
+        const goalMonthly = Number((pick(r,['obiettivo','obiettivo mensile','goal'])||'0').replace(',','.'))||0;
+        const prepagatoRenewal = pick(r,['rinnovo','rinnovo carnet','scadenza carnet']);
+
+        // upsert su code o su nome
+      let c = list.find(x=> (code && x.code===code) || x.name.toLowerCase()===name.toLowerCase());
+        if(!c){
+        c = {id:'C-'+Date.now()+Math.random().toString(36).slice(2,6), code, name, piva, address, city, cap, prov, region,
+             phone, email, contact, tier, status, goalMonthly, prepagatoRenewal, lastVisitDate:'', nextVisitDate:'', notes:''};
+          list.push(c); added++;
+        }else{
+          Object.assign(c, {code, piva, address, city, cap, prov, region, phone, email, contact, tier, status, goalMonthly, prepagatoRenewal});
+        }
+        });
+
+          setClients(list);
+          alert('Clienti importati/aggiornati: '+added);
+      // ridisegna lista clienti
+          renderClienti(document.getElementById('view'), query);
+        });
+    }
+
     }
 
     // ——— Visite ———
@@ -250,7 +403,10 @@
               '<select class=\"border rounded-xl px-3 py-2\" name=\"reason\">',['Presentazione','Follow-up','Listino','Promo','Reclamo','Riscossione','Altro'].map(x=>'<option>'+x+'</option>').join(''),'</select>',
               '<select class=\"border rounded-xl px-3 py-2\" name=\"esito\">',['Positivo','Neutro','Negativo'].map(x=>'<option>'+x+'</option>').join(''),'</select>',
               '<input class=\"border rounded-xl px-3 py-2\" type=\"date\" name=\"nextDate\" placeholder=\"Prossima\">',
-              '<input class=\"border rounded-xl px-3 py-2 md:col-span-3\" name=\"notes\" placeholder=\"Note visita (azioni, feedback)\">',
+              '<div class="md:col-span-3 flex gap-2 items-center">',
+                '<input class="border rounded-xl px-3 py-2 flex-1" name="notes" placeholder="Note visita (azioni, feedback)">',
+                '<button type="button" id="dictate" class="btn">🎤 Dettatura</button>',
+                '</div>',
               '<div class=\"md:col-span-6 text-right\"><button class=\"btn-primary\">Salva</button></div>',
             '</form>',
           '</div></div>',
@@ -265,58 +421,174 @@
       repaint();
       const f=root.querySelector('#fVisit'); f.addEventListener('submit',e=>{e.preventDefault(); const data=Object.fromEntries(new FormData(f).entries()); const id=nextId('V'); const v={id,...data}; visits.unshift(v); setVisits(visits);
         const s=getSettings(); const all=getClients(); const c=all.find(x=>x.id===data.clientId); if(c){ const next=data.nextDate||addDays(data.date,tierToFreq(c.tier||'standard',s)); c.lastVisitDate=data.date; c.nextVisitDate=next; setClients(all); } repaint(); f.reset(); });
-    }
+      // Dettatura note (Web Speech API)
+        const btnDict = root.querySelector('#dictate');
+            if(btnDict){
+              btnDict.addEventListener('click', ()=>{
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if(!SpeechRecognition){ alert('Dettatura non supportata su questo browser'); return; }
+                const r = new SpeechRecognition();
+                r.lang = 'it-IT'; r.interimResults = false; r.maxAlternatives = 1;
+                r.onresult = (e)=>{
+                  const txt = e.results[0][0].transcript || '';
+                  const notes = root.querySelector('input[name="notes"]');
+                  notes.value = (notes.value? (notes.value+' ') : '') + txt;
+                };
+                r.onerror = (e)=> alert('Errore dettatura: '+(e.error||''));
+                r.start();
+              });
+            }
+      }
+
 
     // ——— Promozioni ———
     function renderPromo(root){
-      let promos=getPromos();
-      function rows(){ return promos.sort((a,b)=>(b.start||'').localeCompare(a.start||'')).map(p=>['<tr class=\"border-b align-top\">',
-        '<td class=\"px-2 py-2\"><div class=\"font-medium\">',p.title,'</div><div class=\"text-xs text-slate-600\">',(p.desc||''),'</div></td>',
-        '<td class=\"px-2 py-2\">',fmtDate(p.start),' – ',fmtDate(p.end),'</td>',
-        '<td class=\"px-2 py-2\">',(p.provinces||[]).join(', ')||'—','</td>',
-        '<td class=\"px-2 py-2 text-right\"><button class=\"btn text-red-600 border-red-300 hover:bg-red-50\" data-del=\"',p.id,'\">Elimina</button></td>',
-        '<td class=\"px-2 py-2 text-right\"><button class=\"btn\" data-ics=\"',p.id,'\">Promemoria scadenza</button></td>',
-      '</tr>'].join('')).join(''); }
-      root.innerHTML=[
-        '<div class=\"space-y-4\">',
-          '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Nuova promozione</h3></div>',
-            '<div class=\"card-b\">',
-              '<form id=\"fPromo\" class=\"grid grid-cols-1 md:grid-cols-6 gap-3\">',
-                '<input class=\"border rounded-xl px-3 py-2\" name=\"title\" placeholder=\"Titolo\">',
-                '<input class=\"border rounded-xl px-3 py-2\" type=\"date\" name=\"start\" value=\"',today(),'\">',
-                '<input class=\"border rounded-xl px-3 py-2\" type=\"date\" name=\"end\">',
-                '<div class=\"md:col-span-6\"><textarea class=\"border rounded-xl px-3 py-2 w-full\" name=\"desc\" placeholder=\"Descrizione/condizioni\"></textarea></div>',
-                '<div class=\"md:col-span-6\"><div class=\"text-sm font-medium mb-2\">Province target</div><div class=\"flex flex-wrap gap-2\" id=\"pProvs\">',
-                  Object.values(TRIVENETO).flat().map(p=>'<label class=\"px-2 py-1 border rounded-xl text-sm cursor-pointer\"><input type=\"checkbox\" value=\"'+p+'\" class=\"mr-1\">'+p+'</label>').join(''),
-                '</div></div>',
-                '<div class=\"md:col-span-6 text-right\"><button class=\"btn-primary\">Salva promo</button></div>',
-              '</form>',
-            '</div>',
-          '</div>',
-          '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Promozioni attive & storiche</h3></div>',
-            '<div class=\"card-b overflow-auto\"><table class=\"min-w-full text-sm\"><thead class=\"bg-slate-100 text-slate-600\"><tr>',
-            '<th class=\"text-left px-2 py-2\">Titolo</th><th class=\"text-left px-2 py-2\">Periodo</th><th class=\"text-left px-2 py-2\">Province</th><th class=\"px-2 py-2\"></th><th class=\"px-2 py-2\">Calendario</th>',
-            '</tr></thead><tbody id=\"rows\">',rows(),'</tbody></table></div>',
-          '</div>',
-        '</div>'
-      ].join('');
-      function repaint(){ const tbody=document.getElementById('rows'); tbody.innerHTML=rows();
-        tbody.querySelectorAll('[data-del]').forEach(btn=>btn.addEventListener('click',()=>{ const id=btn.getAttribute('data-del'); if(confirm('Eliminare promo?')){ promos=promos.filter(x=>x.id!==id); setPromos(promos); repaint(); } }));
-        tbody.querySelectorAll('[data-ics]').forEach(btn=>btn.addEventListener('click',()=>{
-          const id=btn.getAttribute('data-ics'); const p=promos.find(x=>x.id===id); if(!p||!p.end){ alert('Imposta la data di fine'); return; }
-          const end=new Date(p.end); const start=new Date(end.getTime()-7*24*60*60*1000);
-          const pad=n=>String(n).padStart(2,'0');
-          const toICS=d=>d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'T'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
-          const esc=s=>String(s||'').replace(/[\\,;\\n]/g, m => (m==='\\'?'\\\\':m===','?'\\,':m===';'?'\\;':'\\n'));
-          const ics=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//CRM Lenti//IT','CALSCALE:GREGORIAN','BEGIN:VEVENT',
-            'UID:PROMO-'+id,'DTSTAMP:'+toICS(new Date()),'DTSTART:'+toICS(start),'DTEND:'+toICS(new Date(start.getTime()+60*60*1000)),
-            'SUMMARY:'+esc('PROMO in scadenza: '+p.title),'DESCRIPTION:'+esc(p.desc||''),'END:VEVENT','END:VCALENDAR'].join('\r\n');
-          const blob=new Blob([ics],{type:'text/calendar'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='promo_'+id+'_promemoria.ics'; a.click();
-        }));
+  let catalog=getPromos();       // catalogo promozioni (modello)
+  let cPromos=getCPromos();      // assegnazioni per cliente
+  const clients=getClients();
+  const preClient = window._promoClientPreselect || '';
+
+  function rowCatalog(p){
+    return ['<tr class="border-b align-top">',
+      '<td class="px-2 py-2"><div class="font-medium">',p.title,'</div><div class="text-xs text-slate-600">',(p.desc||''),'</div></td>',
+      '<td class="px-2 py-2">',(p.defaultDays? (p.defaultDays+' gg') : '—'),'</td>',
+      '<td class="px-2 py-2">',(p.provinces||[]).join(', ')||'—','</td>',
+      '<td class="px-2 py-2 text-right"><button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del-cat="',p.id,'">Elimina</button></td>',
+    '</tr>'].join('');
+  }
+
+  function rowAct(cp){
+    const cli = clients.find(c=>c.id===cp.clientId);
+    const daysLeft = cp.end ? daysBetween(today(), cp.end) : null;
+    const badge = (daysLeft!=null)
+      ? (daysLeft<0?'<span class="pill bg-slate-100 text-slate-600 border-slate-200">scaduta</span>'
+          : (daysLeft<=7?'<span class="pill bg-amber-100 text-amber-700 border-amber-200">'+daysLeft+'g</span>'
+                        : '<span class="pill">'+daysLeft+'g</span>'))
+      : '—';
+    return ['<tr class="border-b align-top">',
+      '<td class="px-2 py-2">',cli?cli.name:'—','</td>',
+      '<td class="px-2 py-2">',cp.title,'</td>',
+      '<td class="px-2 py-2">',fmtDate(cp.start),' – ',fmtDate(cp.end),'</td>',
+      '<td class="px-2 py-2">',badge,'</td>',
+      '<td class="px-2 py-2">',cp.note||'','</td>',
+      '<td class="px-2 py-2 text-right">',
+        '<button class="btn" data-ics="',cp.id,'">ICS</button> ',
+        '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del-act="',cp.id,'">Elimina</button>',
+      '</td>',
+    '</tr>'].join('');
+  }
+
+  root.innerHTML=[
+    '<div class="space-y-4">',
+
+      // CATALOGO
+      '<div class="card"><div class="card-h"><h3 class="font-semibold">Catalogo promozioni</h3></div>',
+      '<div class="card-b">',
+        '<form id="fCat" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+          '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="title" placeholder="Titolo promo">',
+          '<input class="border rounded-xl px-3 py-2" type="number" name="defaultDays" placeholder="Durata standard (giorni)">',
+          '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="desc" placeholder="Descrizione/condizioni"></textarea></div>',
+          '<div class="md:col-span-6"><div class="text-sm font-medium mb-2">Province consigliate</div><div class="flex flex-wrap gap-2" id="pProvs">',
+            Object.values(TRIVENETO).flat().map(p=>'<label class="px-2 py-1 border rounded-xl text-sm cursor-pointer"><input type="checkbox" value="'+p+'" class="mr-1">'+p+'</label>').join(''),
+          '</div></div>',
+          '<div class="md:col-span-6 text-right"><button class="btn-primary">Aggiungi a catalogo</button></div>',
+        '</form>',
+      '</div>',
+      '<div class="card"><div class="card-b overflow-auto">',
+        '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+        '<th class="text-left px-2 py-2">Titolo</th><th class="text-left px-2 py-2">Durata std</th><th class="text-left px-2 py-2">Province</th><th class="px-2 py-2"></th>',
+        '</tr></thead><tbody id="rowsCat">', catalog.map(rowCatalog).join('') ,'</tbody></table>',
+      '</div></div>',
+
+      // ATTIVAZIONI PER CLIENTE
+      '<div class="card"><div class="card-h"><h3 class="font-semibold">Attiva promozione su cliente</h3></div>',
+      '<div class="card-b">',
+        '<form id="fAct" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+          '<select class="border rounded-xl px-3 py-2 md:col-span-2" name="clientId">',
+            clients.map(c=>'<option value="'+c.id+'" '+(preClient===c.id?'selected':'')+'>'+c.name+'</option>').join(''),
+          '</select>',
+          '<select class="border rounded-xl px-3 py-2 md:col-span-2" name="promoId">',
+            catalog.map(p=>'<option value="'+p.id+'">'+p.title+'</option>').join(''),
+          '</select>',
+          '<input class="border rounded-xl px-3 py-2" type="date" name="start" value="'+today()+'">',
+          '<input class="border rounded-xl px-3 py-2" type="date" name="end" placeholder="Fine (opzionale)">',
+          '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="note" placeholder="Note per questo cliente"></textarea></div>',
+          '<div class="md:col-span-6 text-right"><button class="btn-primary">Attiva</button></div>',
+        '</form>',
+      '</div></div>',
+
+      '<div class="card"><div class="card-h"><h3 class="font-semibold">Promozioni per cliente</h3></div>',
+        '<div class="card-b overflow-auto">',
+          '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+          '<th class="text-left px-2 py-2">Cliente</th><th class="text-left px-2 py-2">Promo</th><th class="text-left px-2 py-2">Periodo</th><th class="text-left px-2 py-2">Giorni</th><th class="text-left px-2 py-2">Note</th><th class="px-2 py-2"></th>',
+          '</tr></thead><tbody id="rowsAct">', cPromos.map(rowAct).join('') ,'</tbody></table>',
+        '</div>',
+      '</div>',
+
+    '</div>'
+  ].join('');
+
+  // Handlers catalogo
+  const repaintCat=()=>{ document.getElementById('rowsCat').innerHTML = catalog.map(rowCatalog).join(''); attachDelCat(); };
+  function attachDelCat(){
+    document.querySelectorAll('[data-del-cat]').forEach(b=>b.addEventListener('click',()=>{
+      const id=b.getAttribute('data-del-cat');
+      if(confirm('Eliminare voce di catalogo?')){
+        catalog=catalog.filter(x=>x.id!==id); setPromos(catalog); repaintCat();
       }
-      repaint();
-      const f=root.querySelector('#fPromo'); f.addEventListener('submit',e=>{e.preventDefault(); const data=Object.fromEntries(new FormData(f).entries()); const provinces=[...root.querySelectorAll('#pProvs input[type=checkbox]:checked')].map(x=>x.value); const p={id:'P-'+Date.now(),...data,provinces,status:'attiva'}; promos.unshift(p); setPromos(promos); repaint(); f.reset(); });
+    }));
+  }
+  attachDelCat();
+
+  document.getElementById('fCat').addEventListener('submit',e=>{
+    e.preventDefault();
+    const data=Object.fromEntries(new FormData(e.target).entries());
+    const provinces=[...document.querySelectorAll('#pProvs input[type=checkbox]:checked')].map(x=>x.value);
+    const p={id:'PC-'+Date.now(), title:data.title, desc:data.desc, defaultDays:Number(data.defaultDays||0)||null, provinces};
+    catalog.unshift(p); setPromos(catalog); e.target.reset(); repaintCat();
+  });
+
+  // Handlers attivazioni
+  const repaintAct=()=>{ document.getElementById('rowsAct').innerHTML = cPromos.map(rowAct).join(''); attachActBtns(); };
+  function attachActBtns(){
+    // Elimina attivazione
+    document.querySelectorAll('[data-del-act]').forEach(b=>b.addEventListener('click',()=>{
+      const id=b.getAttribute('data-del-act');
+      if(confirm('Eliminare attivazione?')){
+        cPromos=cPromos.filter(x=>x.id!==id); setCPromos(cPromos); repaintAct();
+      }
+    }));
+    // ICS scadenza per cliente
+    document.querySelectorAll('[data-ics]').forEach(btn=>btn.addEventListener('click',()=>{
+      const id=btn.getAttribute('data-ics'); const cp=cPromos.find(x=>x.id===id); if(!cp||!cp.end){ alert('Imposta la data di fine'); return; }
+      const end=new Date(cp.end); const start=new Date(end.getTime()-7*24*60*60*1000);
+      const pad=n=>String(n).padStart(2,'0');
+      const toICS=d=>d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'T'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
+      const esc=s=>String(s||'').replace(/[\\,;\\n]/g, m => (m==='\\'?'\\\\':m===','?'\\,':m===';'?'\\;':'\\n'));
+      const cli=clients.find(c=>c.id===cp.clientId);
+      const ics=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//CRM Lenti//IT','CALSCALE:GREGORIAN','BEGIN:VEVENT',
+        'UID:CP-'+id,'DTSTAMP:'+toICS(new Date()),'DTSTART:'+toICS(start),'DTEND:'+toICS(new Date(start.getTime()+60*60*1000)),
+        'SUMMARY:'+esc('Promo in scadenza – '+(cli?cli.name:'Cliente')),'DESCRIPTION:'+esc(cp.title+(cp.note?(' — '+cp.note):'')),'END:VEVENT','END:VCALENDAR'].join('\r\n');
+      const blob=new Blob([ics],{type:'text/calendar'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='promo_cliente_'+id+'.ics'; a.click();
+    }));
+  }
+  attachActBtns();
+
+  document.getElementById('fAct').addEventListener('submit',e=>{
+    e.preventDefault();
+    const data=Object.fromEntries(new FormData(e.target).entries());
+    const promo=catalog.find(p=>p.id===data.promoId);
+    let end=data.end;
+    if(!end && promo?.defaultDays){
+      end = addDays(data.start, Number(promo.defaultDays));
     }
+    const cp={id:'CP-'+Date.now(), clientId:data.clientId, promoId:data.promoId, title:promo?promo.title:'Promo', start:data.start||today(), end:end||'', note:data.note||''};
+    cPromos.unshift(cp); setCPromos(cPromos);
+    window._promoClientPreselect=''; // pulisci preselect
+    e.target.reset(); repaintAct();
+    alert('Promo attivata al cliente');
+  });
+}
 
     // ——— Fatturati & Statistiche ———
     function parseCSV(text){
@@ -443,30 +715,53 @@
               changed++;
             });
           } else {
-            const year=Number(document.getElementById('impYear').value||new Date().getFullYear());
-            const weeks=(document.getElementById('impWeeks').value||'').split(',').map(x=>Number(x.trim())).filter(Boolean);
-            if(!weeks.length){ alert('Specifica le settimane (es. 40,41,42,43)'); return; }
-            const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale')>-1?idx('ragione sociale'):0;
-            const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
-            const salesWLocal=[...getSalesW()]; const salesLocal=[...getSales()];
-            tab.rows.forEach(r=>{
-              const name=r[ic]?.trim(); const code=r[icode]?.trim(); const id=matchClient(name, code); if(!id) return;
-              weeks.forEach(w=>{
-                let colIndex = h.findIndex(col => col.replace(/\s+/g,'').includes(String(w)));
-                if(colIndex<0) return;
-                const amt=normalizeAmount(r[colIndex]||0); if(!amt) return;
-                const date=isoWeekStart(year, w).toISOString().slice(0,10);
-                const exists=salesWLocal.some(x=>x.clientId===id && x.year===year && x.week===w && Math.abs(Number(x.amount)-Number(amt))<0.001);
-                if(!exists){
-                  salesWLocal.push({id:nextId('W'), clientId:id, year, week:w, dateISO:date, amount:amt});
-                  const m=date.slice(0,7);
-                  salesLocal.push({id:nextId('S'), clientId:id, month:m, amount:amt});
-                  changed++;
-                }
-              });
-            });
-            setSalesW(salesWLocal); setSales(salesLocal);
-          }
+  const year=Number(document.getElementById('impYear').value||new Date().getFullYear());
+  const weeks=(document.getElementById('impWeeks').value||'').split(',').map(x=>Number(x.trim())).filter(Boolean);
+  if(!weeks.length){ alert('Specifica le settimane (es. 40,41,42,43)'); return; }
+  const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale')>-1?idx('ragione sociale'):0;
+  const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
+
+  // Copie mutabili
+  let salesWLocal=[...getSalesW()];
+  let salesLocal=[...getSales()];
+
+  // Per ricostruire mensile da settimane cambiate
+  const touchedPairs = new Set(); // `${clientId}|${month}`
+
+  tab.rows.forEach(r=>{
+    const name=r[ic]?.trim(); const code=r[icode]?.trim(); const id=matchClient(name, code); if(!id) return;
+    weeks.forEach(w=>{
+      let colIndex = h.findIndex(col => col.replace(/\s+/g,'').includes(String(w)));
+      if(colIndex<0) return;
+      const amt=normalizeAmount(r[colIndex]||0);
+      const date=isoWeekStart(year, w).toISOString().slice(0,10);
+      const monthKey=date.slice(0,7);
+      // UPsert settimanale (clientId+year+week)
+      const idxW = salesWLocal.findIndex(x=>x.clientId===id && x.year===year && x.week===w);
+      if(idxW>=0){
+        salesWLocal[idxW] = {...salesWLocal[idxW], amount:amt, dateISO:date};
+      } else {
+        salesWLocal.push({id:nextId('W'), clientId:id, year, week:w, dateISO:date, amount:amt});
+      }
+      touchedPairs.add(id+'|'+monthKey);
+    });
+  });
+
+  // Ricostruisci record mensile "source:weekly" per i pair toccati
+  touchedPairs.forEach(pair=>{
+    const [cid, m] = pair.split('|');
+    const sumW = salesWLocal.filter(x=>x.clientId===cid && x.dateISO.slice(0,7)===m)
+                  .reduce((a,b)=>a+Number(b.amount||0),0);
+    // cerca un record mensile marcato come derivato dalle settimane
+    const idxM = salesLocal.findIndex(x=>x.clientId===cid && x.month===m && x.source==='weekly');
+    const rec = {id: idxM>=0? salesLocal[idxM].id : nextId('S'), clientId:cid, month:m, amount:sumW, source:'weekly'};
+    if(idxM>=0) salesLocal[idxM]=rec; else salesLocal.push(rec);
+  });
+
+  setSalesW(salesWLocal);
+  setSales(salesLocal);
+  changed = touchedPairs.size; // numero di mesi (cliente×mese) aggiornati
+}
           alert('Import: '+changed+' righe aggiunte');
           paint();
         });
@@ -486,7 +781,7 @@
       function googleMapsLink(origin, stops){
         const enc = s=>encodeURIComponent(s||'');
         if(!stops.length) return '#';
-        const originQ = enc(origin || s.baseCity || 'Padova');
+        const originQ = enc((origin || s.baseCity || 'Padova'));
         const dest = enc((stops[stops.length-1].address||stops[stops.length-1].city||'').trim());
         const way = stops.slice(0, Math.max(0,stops.length-1)).map(x=> enc((x.address||x.city||'').trim()) ).join('|');
         let url='https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+originQ+'&destination='+dest;
@@ -498,12 +793,14 @@
           '<div class=\"space-y-4\">',
             '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Nuovo giro</h3></div>',
               '<div class=\"card-b\">',
-                '<form id=\"fTour\" class=\"grid grid-cols-1 md:grid-cols-6 gap-3\">',
-                  '<input class=\"border rounded-xl px-3 py-2\" type=\"date\" name=\"date\" value=\"',today(),'\">',
-                  '<input class=\"border rounded-xl px-3 py-2 md:col-span-2\" name=\"name\" placeholder=\"Nome giro (es. Padova nord)\">',
-                  '<select class=\"border rounded-xl px-3 py-2\" name=\"prov\"><option value=\"\">Tutte le province</option>',Object.values(TRIVENETO).flat().map(p=>'<option>'+p+'</option>').join(''),'</select>',
-                  '<input class=\"border rounded-xl px-3 py-2\" type=\"number\" name=\"perDay\" value=\"4\" placeholder=\"Stop per giorno\">',
-                  '<div class=\"md:col-span-6 text-right\"><button class=\"btn-primary\">Crea</button></div>',
+                '<form id="fTour" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+                  '<input class="border rounded-xl px-3 py-2" type="date" name="date" value="__TODAY__">',
+                  '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" placeholder="Nome giro (es. Padova nord)"',
+                  '<select class="border rounded-xl px-3 py-2" name="prov"><option value="">Tutte le province</option>__PROV_OPTS__</select>',
+                  '<input class="border rounded-xl px-3 py-2" type="number" name="perDay" value="4" placeholder="Stop per giorno">',
+                  '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="origin" placeholder="Partenza da (es. Prato della Valle, Padova)">',
+                  '<input class="border rounded-xl px-3 py-2" type="time" name="startTime" value="08:30">',
+                  '<div class="md:col-span-6 text-right"><button class="btn-primary">Crea</button></div>',
                 '</form>',
               '</div>',
             '</div>',
@@ -516,7 +813,7 @@
         const list=root.querySelector('#toursList');
         list.innerHTML = tours.length ? tours.map(t => {
           const stops=(t.stops||[]).map((st,i)=> (i+1)+'. '+(getClients().find(c=>c.id===st.clientId)||{}).name ).join('<br>');
-          const url=googleMapsLink(getSettings().baseCity, (t.stops||[]).map(st=>getClients().find(c=>c.id===st.clientId)||{}));
+          const url=googleMapsLink(t.origin || getSettings().baseCity, (t.stops||[]).map(st=>getClients().find(c=>c.id===st.clientId)||{}));
           return ['<div class=\"border rounded-xl p-3 mb-3\">',
             '<div class=\"flex items-center justify-between\"><div><div class=\"font-medium\">',t.name||('Giro '+t.date),'</div><div class=\"text-xs text-slate-500\">',fmtDate(t.date),'</div></div>',
             '<div class=\"space-x-2\"><a class=\"btn\" target=\"_blank\" href=\"',url,'\">Apri in Google Maps</a><button class=\"btn\" data-edit=\"',t.id,'\">Modifica</button><button class=\"btn text-red-600 border-red-300 hover:bg-red-50\" data-del=\"',t.id,'\">Elimina</button></div></div>',
@@ -527,16 +824,20 @@
         list.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ const id=b.getAttribute('data-del'); if(confirm('Eliminare giro?')){ tours=tours.filter(x=>x.id!==id); setTours(tours); paint(); } }));
         list.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{ const id=b.getAttribute('data-edit'); editTour(id); }));
 
-        const f=root.querySelector('#fTour'); f.addEventListener('submit', e=>{
+        const f=root.querySelector('#fTour');
+          f.addEventListener('submit', e=>{
           e.preventDefault(); const data=Object.fromEntries(new FormData(f).entries());
-          const prov=data.prov||''; const perDay=Math.max(1, Number(data.perDay||4));
-          const candidates=dueCandidates(prov);
-          const groups=[]; for(let i=0;i<candidates.length;i+=perDay){ groups.push(candidates.slice(i,i+perDay)); }
-          const firstGroup = groups[0]||[];
-          const t={id:nextId('T'), date:data.date, name:data.name||('Giro '+data.date), prov, stops:firstGroup.map(c=>({clientId:c.id}))};
-          tours.unshift(t); setTours(tours); paint();
-          alert('Giro creato con '+(firstGroup.length)+' tappe (max '+perDay+' al giorno). Puoi aggiungere/modificare.');
-        });
+        const prov=data.prov||''; const perDay=Math.max(1, Number(data.perDay||4));
+        const candidates=dueCandidates(prov);
+        const groups=[]; for(let i=0;i<candidates.length;i+=perDay){ groups.push(candidates.slice(i,i+perDay)); }
+        const firstGroup = groups[0]||[];
+        const t={id:nextId('T'), date:data.date, name:data.name||('Giro '+data.date), prov,
+                origin:(data.origin||getSettings().baseCity||'Padova'), startTime:(data.startTime||'08:30'),
+                stops:firstGroup.map(c=>({clientId:c.id}))};
+        const tours=getTours(); tours.unshift(t); setTours(tours);
+        paint();
+        alert('Giro creato con '+(firstGroup.length)+' tappe. Partenza '+t.origin+' ore '+t.startTime);
+      });
       }
 
       function editTour(id){
@@ -571,7 +872,7 @@
         function googleMapsLink(origin, stops){
           const enc = s=>encodeURIComponent(s||'');
           if(!stops.length) return '#';
-          const originQ = enc(origin || getSettings().baseCity || 'Padova');
+          const originQ = enc((origin || s.baseCity || 'Padova'));
           const dest = enc((stops[stops.length-1].address||stops[stops.length-1].city||'').trim());
           const way = stops.slice(0, Math.max(0,stops.length-1)).map(x=> enc((x.address||x.city||'').trim()) ).join('|');
           let url='https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+originQ+'&destination='+dest;
@@ -583,7 +884,7 @@
             const name=(getClients().find(c=>c.id===s.clientId)||{}).name||s.clientId;
             return '<div class=\"flex items-center justify-between border-b py-1\"><div>'+(i+1)+'. '+name+'</div><div class=\"space-x-1\"><button class=\"btn\" data-up=\"'+i+'\">↑</button><button class=\"btn\" data-down=\"'+i+'\">↓</button><button class=\"btn text-red-600 border-red-300 hover:bg-red-50\" data-rm=\"'+i+'\">✕</button></div></div>';
           }).join('');
-          const url=googleMapsLink(getSettings().baseCity, (t.stops||[]).map(st=>getClients().find(c=>c.id===st.clientId)||{}));
+          const url=googleMapsLink(t.origin || getSettings().baseCity, (t.stops||[]).map(st=>getClients().find(c=>c.id===st.clientId)||{}));
           const g=document.getElementById('gmap'); g.href=url;
           stopsBox.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{ const i=Number(b.getAttribute('data-rm')); t.stops.splice(i,1); setTours([...getTours().filter(x=>x.id!==id), t]); repaintStops(); }));
           stopsBox.querySelectorAll('[data-up]').forEach(b=>b.addEventListener('click',()=>{ const i=Number(b.getAttribute('data-up')); if(i>0){ const tmp=t.stops[i-1]; t.stops[i-1]=t.stops[i]; t.stops[i]=tmp; setTours([...getTours().filter(x=>x.id!==id), t]); repaintStops(); } }));
@@ -707,14 +1008,19 @@
       async function fbUpload(){
         if(!window._fbDB){ alert('Connettiti prima'); return; }
         const fb=getFB(); const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
-        const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),salesW:getSalesW(),tours:getTours(),ts:new Date().toISOString()};
-        await docRef.set(payload); alert('Upload completato');
+        const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
+        await docRef.set(payload);
+        setSync({lastSyncISO:new Date().toISOString()});
+        alert('Upload completato'); 
       }
       async function fbDownload(){
         if(!window._fbDB){ alert('Connettiti prima'); return; }
         const fb=getFB(); const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
         const snap=await docRef.get(); if(!snap.exists){ alert('Nessun dato sul cloud'); return; }
-        const data=snap.data(); ['settings','clients','visits','promos','sales','salesW','tours'].forEach(k=>{ if(data[k]!=null) lsSet(k,data[k]); }); alert('Scaricato. Ricarica la pagina.');
+        const data=snap.data();
+        ['settings','clients','visits','promos','sales','salesW','tours','cPromos'].forEach(k=>{ if(data[k]!=null) lsSet(k,data[k]); });
+        if(data.ts){ setSync({lastSyncISO:data.ts}); }
+        alert('Scaricato. Ricarica la pagina.');
       }
       document.getElementById('fbEnable').addEventListener('change',saveFB);
       document.getElementById('fbAgent').addEventListener('change',saveFB);
