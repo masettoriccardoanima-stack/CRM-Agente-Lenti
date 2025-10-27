@@ -187,7 +187,18 @@ async function ensureFirebaseConnected(){
       document.getElementById('scrim').addEventListener('click',()=>openDrawer(false));
       const q=document.getElementById('q'); if(q) q.addEventListener('input',e=>{query=e.target.value||'';render()});
     }
-    function render(){layout();const root=document.getElementById('view'); if(route==='dashboard')return renderDashboard(root); if(route==='clienti')return renderClienti(root,query); if(route==='visite')return renderVisite(root); if(route==='promo')return renderPromo(root); if(route==='fatturati')return renderFatturati(root); if(route==='agenda')return renderAgenda(root); if(route==='impostazioni')return renderImpostazioni(root);}
+    function render(){
+  layout();
+  const root=document.getElementById('view');
+  if(route==='dashboard') return renderDashboard(root);
+  if(route==='clienti')   return renderClienti(root,query);
+  if(route==='visite')    return renderVisite(root);
+  if(route==='promo')     return renderPromo(root);
+  if(route==='fatturati') return renderFatturati(root);
+  if(route==='agenda')    return renderAgenda(root);
+  if(route==='impostazioni') return renderImpostazioni(root);
+  if(route==='cliente')   return renderCliente(root, window._openClientId);   // 👈 AGGIUNGI QUESTA
+}
 
     // ——— Dashboard ———
     function lastSaleDateByClient(){
@@ -292,9 +303,11 @@ async function ensureFirebaseConnected(){
   const overdue=c.lastVisitDate && new Date(addDays(c.lastVisitDate,freq)) < new Date(today());
 
   return ['<tr class="border-b align-top">',
-    '<td class="px-2 py-2 font-mono">', c.code||'', '</td>',
-    '<td class="px-2 py-2"><div class="font-medium">', c.name, '</div>',
-       '<div class="text-xs text-slate-500">', (c.contact||''), '</div></td>',
+    '<td class="px-2 py-2">' +
+  '<a href="#" data-open="'+c.id+'" class="font-medium text-blue-600 hover:underline">'+c.name+'</a>' +
+  '<div class="text-xs text-slate-500">'+(c.contact||'')+'</div>' +
+  '</td>',
+
     '<td class="px-2 py-2">', (c.city||''), ' (', (c.prov||''), ')</td>',
     '<td class="px-2 py-2">', c.tier||'standard', '</td>',
     '<td class="px-2 py-2 ', (overdue?'text-red-600 font-semibold':''), '">', fmtDate(c.lastVisitDate), '</td>',
