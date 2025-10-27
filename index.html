@@ -84,6 +84,39 @@ async function ensureFirebaseConnected(){
   return !!window._fbDB;
 }
 
+// ——— Firebase helpers (global) ———
+function loadFirebaseCDN(){
+  if(window.firebase) return Promise.resolve();
+  const urls = [
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js',
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js'
+  ];
+  let loaded = 0;
+  return new Promise((resolve, reject)=>{
+    urls.forEach(u=>{
+      const s = document.createElement('script');
+      s.src = u; s.async = true;
+      s.onload = ()=>{ if(++loaded === urls.length) resolve(); };
+      s.onerror = ()=>reject(new Error('Errore caricamento SDK: '+u));
+      document.head.appendChild(s);
+    });
+  });
+}
+
+async function ensureFirebaseConnected(){
+  const fb = getFB();
+  if(!fb.enabled || !fb.config || !fb.agentId) return false;
+  await loadFirebaseCDN();
+  if(!window._fbApp){
+    window._fbApp = firebase.initializeApp(fb.config);
+    window._fbAuth = firebase.auth();
+    window._fbDB  = firebase.firestore();
+  }
+  if(!window._fbAuth.currentUser) await window._fbAuth.signInAnonymously();
+  return !!window._fbDB;
+}
+
     // ——— Seeds ———
     const DEFAULT_SETTINGS={agencyName:'Marinelli Optodinamica – Agente',agentName:'Agente Demo',baseCity:'Padova',freqStandard:90,freqImportant:30,freqNew:21, annualGoal:130000};
     const TRIVENETO={ 'Veneto':['PD','VE','TV','VI','VR','RO','BL'], 'Trentino-Alto Adige/Südtirol':['TN','BZ'], 'Friuli Venezia Giulia':['TS','GO','PN','UD'] };
@@ -1065,49 +1098,44 @@ async function ensureFirebaseConnected(){
       document.getElementById('import').addEventListener('change',ev=>{ const file=ev.target.files?.[0]; if(!file) return; const fr=new FileReader(); fr.onload=()=>{ try{ const data=JSON.parse(fr.result); ['settings','clients','visits','promos','sales','salesW','tours','firebase'].forEach(k=>{ if(data[k]!=null) lsSet(k,data[k]); }); alert('Import eseguito. Ricarica la pagina.'); }catch{ alert('File non valido'); } }; fr.readAsText(file); });
       document.getElementById('wipe').addEventListener('click',()=>{ if(confirm('Sicuro?')){ ['settings','clients','visits','promos','sales','salesW','tours','firebase','counters'].forEach(k=>localStorage.removeItem(k)); location.reload(); } });
 
-      // ——— Firebase loader (v6.2) ———
-      function loadFirebaseCDN(){
-        if(window.firebase) return Promise.resolve();
-        const urls=[
-          'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
-          'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js',
-          'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js'
-        ];
-        let loaded=0;
-        return new Promise((resolve,reject)=>{
-          urls.forEach(u=>{
-            const s=document.createElement('script');
-            s.src=u; s.async=true;
-            s.onload=()=>{ loaded++; if(loaded===urls.length){ resolve(); } };
-            s.onerror=()=>reject(new Error('Errore caricamento SDK: '+u));
-            document.head.appendChild(s);
-          });
-        });
-      }
       function saveFB(){
-        const enabled=document.getElementById('fbEnable').checked;
-        const agentId=val('#fbAgent'); let conf=null;
-        try{ conf=JSON.parse(val('#fbConfig')||'null'); }catch{ alert('Config non è un JSON valido'); return; }
-        setFB({enabled, agentId, config:conf}); document.getElementById('fbStatus').textContent='Stato: impostazioni salvate';
-      }
-      async function fbConnect(){
-        const ok = await ensureFirebaseConnected();
-        if(!ok){ alert('Compila agent id, config e abilita'); return; }
-        const uid = window._fbAuth.currentUser?.uid || '(anonimo)';
-        document.getElementById('fbStatus').textContent='Stato: connesso (UID '+uid+')';
-        alert('Connesso (Anonymous)');
-      }
-      async function fbTest(){
-        try{
-          if(!window._fbDB){ alert('Connettiti prima'); return; }
-          const fb=getFB();
-          const ref=window._fbDB.collection('agents').doc(fb.agentId).collection('ping').doc('test');
-          await ref.set({at:new Date().toISOString(), ua:navigator.userAgent});
-          const snap=await ref.get();
-          if(snap.exists){ alert('Test OK: lettura/scrittura Firestore riuscita.'); }
-          else { alert('Test fallito: documento non trovato.'); }
-        }catch(e){ alert('Test errore: '+(e?.message||e)); }
-      }
+  const enabled = document.getElementById('fbEnable').checked;
+  const agentId = val('#fbAgent');
+  let conf = null;
+  try { conf = JSON.parse(val('#fbConfig') || 'null'); }
+  catch { alert('Config non è un JSON valido'); return; }
+  setFB({enabled, agentId, config: conf});
+  document.getElementById('fbStatus').textContent = 'Stato: impostazioni salvate';
+}
+
+async function fbConnect(){
+  try{
+    saveFB(); // <-- salva i valori correnti prima di connettere
+    const ok = await ensureFirebaseConnected();
+    if(!ok){ alert('Compila agent id, config e abilita'); return; }
+    const uid = window._fbAuth.currentUser?.uid || '(anonimo)';
+    document.getElementById('fbStatus').textContent = 'Stato: connesso (UID '+uid+')';
+    alert('Connesso (Anonymous)');
+  }catch(e){
+    console.error(e);
+    alert('Errore connessione: '+(e?.message||e));
+  }
+}
+
+async function fbTest(){
+  try{
+    const ok = await ensureFirebaseConnected();   // <-- prova a connetterti al volo
+    if(!ok){ alert('Connettiti prima'); return; }
+    const fb=getFB();
+    const ref=window._fbDB.collection('agents').doc(fb.agentId).collection('ping').doc('test');
+    await ref.set({at:new Date().toISOString(), ua:navigator.userAgent});
+    const snap=await ref.get();
+    alert(snap.exists ? 'Test OK: lettura/scrittura riuscita.' : 'Test fallito: documento non trovato.');
+  }catch(e){
+    alert('Test errore: '+(e?.message||e));
+  }
+}
+
       async function fbUpload(){
         if(!window._fbDB){ alert('Connettiti prima'); return; }
         const fb=getFB(); const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
