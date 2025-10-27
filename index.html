@@ -794,9 +794,11 @@
             '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Nuovo giro</h3></div>',
               '<div class=\"card-b\">',
                 '<form id="fTour" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
-                  '<input class="border rounded-xl px-3 py-2" type="date" name="date" value="__TODAY__">',
-                  '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" placeholder="Nome giro (es. Padova nord)"',
-                  '<select class="border rounded-xl px-3 py-2" name="prov"><option value="">Tutte le province</option>__PROV_OPTS__</select>',
+                  '<input class="border rounded-xl px-3 py-2" type="date" name="date" value="', today() ,'">',
+                  '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" placeholder="Nome giro (es. Padova nord)">',
+                  '<select class="border rounded-xl px-3 py-2" name="prov"><option value="">Tutte le province</option>',
+                    provOpts,
+                  '</select>',
                   '<input class="border rounded-xl px-3 py-2" type="number" name="perDay" value="4" placeholder="Stop per giorno">',
                   '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="origin" placeholder="Partenza da (es. Prato della Valle, Padova)">',
                   '<input class="border rounded-xl px-3 py-2" type="time" name="startTime" value="08:30">',
@@ -844,6 +846,8 @@
         const t=(getTours().find(x=>x.id===id)); if(!t){ paint(); return; }
         const prov=t.prov||''; const candidates=getClients().filter(c=>!prov || c.prov===prov);
         const root=document.getElementById('view');
+        const provOpts = Object.values(TRIVENETO).flat()
+          .map(p=>'<option value="'+p+'">'+p+'</option>').join('');
         root.innerHTML=[
           '<div class=\"space-y-4\">',
             '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Modifica giro — ',t.name,'</h3></div>',
