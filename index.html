@@ -1339,62 +1339,88 @@ async function ensureFirebaseConnected(){
 
 async function fbConnect(){
   try{
-    saveFB(); // salva prima i campi UI
-    const fb = getFB();
-    if(!fb.enabled || !fb.config || !fb.agentId){ alert('Compila agent id, config e abilita'); return; }
-    await loadFirebaseCDN();
-    if(!window._fbApp){
-      window._fbApp=firebase.initializeApp(fb.config);
-      window._fbAuth=firebase.auth();
-      window._fbDB=firebase.firestore();
-    }
-    if(fb.authMode==='password'){
-      const pass = document.getElementById('fbPass')?.value || '';
-      if(!fb.email || !pass){ alert('Inserisci email e password'); return; }
-      window._fbPassword = pass; // volatile in RAM
-      await window._fbAuth.signInWithEmailAndPassword(fb.email, pass);
-    }else{
-      await window._fbAuth.signInAnonymously();
-    }
-    const uid = window._fbAuth.currentUser?.uid || '(?)';
+    document.getElementById('fbStatus').textContent='Stato: connessione in corso...';
+    const ok = await ensureFirebaseConnected();
+    if(!ok){ alert('Compila agent id, config e abilita'); document.getElementById('fbStatus').textContent='Stato: manca configurazione'; return; }
+    const uid = window._fbAuth.currentUser?.uid || '(anonimo)';
     document.getElementById('fbStatus').textContent='Stato: connesso (UID '+uid+')';
-    alert('Connesso');
+    alert('Connesso (Anonymous)');
   }catch(e){
+    console.error(e);
     alert('Errore connessione: '+(e?.message||e));
+    document.getElementById('fbStatus').textContent='Stato: errore connessione';
   }
 }
 
 async function fbTest(){
   try{
-    const ok = await ensureFirebaseConnected();   // <-- prova a connetterti al volo
+    const ok = await ensureFirebaseConnected();
     if(!ok){ alert('Connettiti prima'); return; }
     const fb=getFB();
+    document.getElementById('fbStatus').textContent='Stato: test in corso...';
     const ref=window._fbDB.collection('agents').doc(fb.agentId).collection('ping').doc('test');
     await ref.set({at:new Date().toISOString(), ua:navigator.userAgent});
     const snap=await ref.get();
-    alert(snap.exists ? 'Test OK: lettura/scrittura riuscita.' : 'Test fallito: documento non trovato.');
+    if(snap.exists){
+      alert('Test OK: lettura/scrittura Firestore riuscita.');
+      document.getElementById('fbStatus').textContent='Stato: test OK';
+    } else {
+      alert('Test fallito: documento non trovato.');
+      document.getElementById('fbStatus').textContent='Stato: test fallito';
+    }
   }catch(e){
+    console.error(e);
     alert('Test errore: '+(e?.message||e));
+    document.getElementById('fbStatus').textContent='Stato: errore test';
   }
 }
 
+
       async function fbUpload(){
-        if(!window._fbDB){ alert('Connettiti prima'); return; }
-        const fb=getFB(); const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
-        const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
-        await docRef.set(payload);
-        setSync({lastSyncISO:new Date().toISOString()});
-        alert('Upload completato'); 
-      }
+  try{
+    const ok = await ensureFirebaseConnected();
+    if(!ok){ alert('Connettiti prima'); return; }
+    document.getElementById('fbStatus').textContent='Stato: upload in corso...';
+    const fb=getFB();
+    const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
+    const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
+    await docRef.set(payload);
+    setSync({lastSyncISO:new Date().toISOString()});
+    document.getElementById('fbStatus').textContent='Stato: upload completato';
+    alert('Upload completato');
+  }catch(e){
+    console.error(e);
+    alert('Errore upload: '+(e?.message||e));
+    document.getElementById('fbStatus').textContent='Stato: errore upload';
+  }
+}
+
       async function fbDownload(){
-        if(!window._fbDB){ alert('Connettiti prima'); return; }
-        const fb=getFB(); const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
-        const snap=await docRef.get(); if(!snap.exists){ alert('Nessun dato sul cloud'); return; }
-        const data=snap.data();
-        ['settings','clients','visits','promos','sales','salesW','tours','cPromos'].forEach(k=>{ if(data[k]!=null) lsSet(k,data[k]); });
-        if(data.ts){ setSync({lastSyncISO:data.ts}); }
-        alert('Scaricato. Ricarica la pagina.');
-      }
+  try{
+    const ok = await ensureFirebaseConnected();
+    if(!ok){ alert('Connettiti prima'); return; }
+    document.getElementById('fbStatus').textContent='Stato: download in corso...';
+    const fb=getFB();
+    const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
+    const snap=await docRef.get();
+    if(!snap.exists){
+      document.getElementById('fbStatus').textContent='Stato: nessun dato sul cloud';
+      alert('Nessun dato sul cloud');
+      return;
+    }
+    const data=snap.data();
+    ['settings','clients','visits','promos','sales','salesW','tours','cPromos'].forEach(k=>{ if(data[k]!=null) lsSet(k,data[k]); });
+    if(data.ts){ setSync({lastSyncISO:data.ts}); }
+    document.getElementById('fbStatus').textContent='Stato: dati scaricati ('+ new Date().toLocaleString('it-IT') +')';
+    alert('Scaricato. Ricarico l’app per applicare i dati.');
+    location.reload(); // forza reload anche in PWA
+  }catch(e){
+    console.error(e);
+    alert('Errore download: '+(e?.message||e));
+    document.getElementById('fbStatus').textContent='Stato: errore download';
+  }
+}
+
       document.getElementById('fbEnable').addEventListener('change',saveFB);
       document.getElementById('fbAgent').addEventListener('change',saveFB);
       document.getElementById('fbConfig').addEventListener('change',saveFB);
