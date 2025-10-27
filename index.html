@@ -67,6 +67,23 @@
       return ISOweekStart;
     }
 
+    // ——— Firebase helpers (global) ———
+
+async function ensureFirebaseConnected(){
+  const fb=getFB();
+  if(!fb.enabled || !fb.config || !fb.agentId) return false;
+  if(!window._fbDB){
+    await loadFirebaseCDN();
+    if(!window._fbApp){
+      window._fbApp=firebase.initializeApp(fb.config);
+      window._fbAuth=firebase.auth();
+      window._fbDB=firebase.firestore();
+    }
+    if(!window._fbAuth.currentUser) await window._fbAuth.signInAnonymously();
+  }
+  return !!window._fbDB;
+}
+
     // ——— Seeds ———
     const DEFAULT_SETTINGS={agencyName:'Marinelli Optodinamica – Agente',agentName:'Agente Demo',baseCity:'Padova',freqStandard:90,freqImportant:30,freqNew:21, annualGoal:130000};
     const TRIVENETO={ 'Veneto':['PD','VE','TV','VI','VR','RO','BL'], 'Trentino-Alto Adige/Südtirol':['TN','BZ'], 'Friuli Venezia Giulia':['TS','GO','PN','UD'] };
@@ -217,17 +234,19 @@
 
   // quick sync = richiama upload (se app connessa) al volo
   const qs=root.querySelector('#quickSync');
-  if(qs) qs.addEventListener('click', async ()=>{
-    if(!window._fbDB){ alert('Connettiti prima in Impostazioni → Sincronizzazione'); return; }
-    const fb=getFB(); const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
-    const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
-    await docRef.set(payload);
-    setSync({lastSyncISO:new Date().toISOString()});
-    alert('Sync ok');
-    renderDashboard(root);
-  });
+    if(qs) qs.addEventListener('click', async ()=>{
+      const ok = await ensureFirebaseConnected();
+      if(!ok){ alert('Connettiti prima in Impostazioni → Sincronizzazione'); return; }
+    const fb=getFB();
+    const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
+    const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),
+                 sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
+      await docRef.set(payload);
+      setSync({lastSyncISO:new Date().toISOString()});
+      alert('Sync ok');
+      renderDashboard(root);
+    });
 }
-
 
     // ——— Clienti ———
     function renderClienti(root,q){
@@ -321,81 +340,117 @@
       render();
       }));      
     const btnIC = root.querySelector('#importClients');
-if(btnIC){
-  btnIC.addEventListener('click', async ()=>{
-    const f = root.querySelector('#fileClients').files?.[0];
-    if(!f){ alert('Seleziona un CSV'); return; }
+      if(btnIC){
+        btnIC.addEventListener('click', async ()=>{
+          const f = root.querySelector('#fileClients').files?.[0];
+          if(!f){ alert('Seleziona un CSV'); return; }
 
-    const text = await f.text();
-    const tab = parseCSV(text);
+          const text = await f.text();
+          const lines = text.split(/\r?\n/).filter(l=>l.trim().length);
+          if(!lines.length){ alert('CSV vuoto'); return; }
 
-    // Normalizza i nomi colonna per match robusto (ignora maiuscole, accenti, punti, spazi)
-    const norm = s => String(s||'').toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // rimuovi accenti
-      .replace(/[^a-z0-9]/g,'');                         // lascia solo a-z0-9
-    const H = tab.header.map(h=>h.trim());
-    const HN = H.map(norm);
-    const find = (...aliases) => {
-      const A = aliases.map(norm);
-      for(let i=0;i<HN.length;i++){ if(A.includes(HN[i])) return i; }
-      return -1;
-    };
-    const pick = (row, ...aliases) => {
-      const i = find(...aliases);
-      return i>=0 ? String(row[i]??'').trim() : '';
-    };
+    // Delimitatore (il tuo file usa ";")
+          const sep = lines[0].includes(';') ? ';' : ',';
+          const header = lines[0].split(sep).map(h=>h.trim());
 
-    let list = getClients();
-    let added=0, updated=0;
+    // Normalizza chiavi header (minuscole, senza accenti)
+          const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+          const Hmap = Object.fromEntries(header.map((h,i)=>[norm(h), i]));
 
-    tab.rows.forEach(r=>{
-      // Campi richiesti
-      const code        = pick(r,'codicecliente','codcliente','codice');
-      const name        = pick(r,'ragionesociale','estragionesociale','cliente','nome');
-      if(!name && !code) return; // riga vuota
+          const idx = (...aliases)=> {
+            for(const a of aliases){
+              const i = Hmap[norm(a)];
+              if(i!=null) return i;
+            }
+            return -1;
+          };
 
-      const address     = pick(r,'indirizzo','address');
-      const cap         = pick(r,'cap','capcliente','zip');
-      const city        = pick(r,'localita','comune','citta');
-      const prov        = pick(r,'provincia','prov');
-      const cf          = pick(r,'codicefiscale','cf');
-      const piva        = pick(r,'partitaiva','piva','piva');
-      const contact     = pick(r,'personadiriferimento','contatto','referente');
-      const paymentDesc = pick(r,'despagamento','despagam','descrizionepagamento');
-      const listinoCode = pick(r,'codlistino','codicelistino','listino');
+    // Indici colonne richieste
+          const ix = {
+            code:      idx('Codice Cliente'),
+            name:      idx('Ragione Sociale'),
+            address:   idx('Indirizzo'),
+            cap:       idx('CAP'),
+      // "Località" a volte appare come "Localit�": prendo la prima colonna che inizia con "localit"
+            city:      (()=>{
+                   for (const [k,i] of Object.entries(Hmap)){
+                     if(/^localit/.test(k)) return i;
+                   }
+                   return -1;
+                 })(),
+            prov:      idx('Provincia'),
+            cf:        idx('Codice Fiscale'),
+            piva:      idx('Partita IVA','P.IVA','Partita Iva'),
+            contact:   idx('Persona Di Riferimento','Referente'),
+            email:     idx('Indirizzo email','Email'),
+            phone:     idx('Telefono'),
+            payDesc:   idx('Des. Pagamento','Descrizione Pagamento','Pagamento'),
+            priceCode: idx('Cod. Listino','Codice Listino'),
+            priceDesc: idx('Des. Listino','Descrizione Listino'),
+          };
 
-      // Upsert: prima per codice, altrimenti per ragione sociale
-      let c = list.find(x =>
-        (code && (x.code||'').toLowerCase()===code.toLowerCase()) ||
-        (!code && x.name && x.name.toLowerCase()===String(name).toLowerCase())
-      );
+          if(ix.code<0 && ix.name<0){
+            alert('CSV non riconosciuto: serve almeno "Codice Cliente" o "Ragione Sociale"');
+            return;
+          }
 
-      if(!c){
-        c = {
-          id: 'C-'+Date.now()+Math.random().toString(36).slice(2,6),
-          code, name, address, cap, city, prov, cf, piva,
-          contact, paymentDesc, listinoCode,
-          status: 'attivo',
-          tier: 'standard',
-          goalMonthly: 0,
-          lastVisitDate: '',
-          nextVisitDate: '',
-          notes: ''
-        };
-        list.push(c); added++;
-      }else{
-        Object.assign(c, {code,name,address,cap,city,prov,cf,piva,contact,paymentDesc,listinoCode});
-        updated++;
-      }
-    });
+          let list = getClients();
+          let added = 0, updated = 0;
 
-    setClients(list);
-    alert('Clienti importati: '+added+' — aggiornati: '+updated);
-    renderClienti(document.getElementById('view'), query);
-  });
-}
+          for(let r=1; r<lines.length; r++){
+            const cols = lines[r].split(sep);
 
+            const code = ix.code>=0 ? (cols[ix.code]||'').trim() : '';
+            const name = ix.name>=0 ? (cols[ix.name]||'').trim() : '';
+            if(!code && !name) continue;
+
+            // Trova esistente per priorità: codice -> P.IVA -> nome
+            let cli = list.find(x => (code && x.code===code))
+                    || list.find(x => (ix.piva>=0 && (cols[ix.piva]||'').trim() && x.piva && x.piva.trim().toLowerCase() === (cols[ix.piva]||'').trim().toLowerCase()))
+                    || list.find(x => (name && x.name && x.name.trim().toLowerCase()===name.toLowerCase()));
+
+            const patch = {
+              code,
+              name,
+              address:    ix.address>=0 ? (cols[ix.address]||'').trim() : (cli?.address||''),
+              cap:        ix.cap>=0 ? (cols[ix.cap]||'').trim() : (cli?.cap||''),
+              city:       ix.city>=0 ? (cols[ix.city]||'').trim() : (cli?.city||''),
+              prov:       ix.prov>=0 ? (cols[ix.prov]||'').trim() : (cli?.prov||''),
+              cf:         ix.cf>=0 ? (cols[ix.cf]||'').trim() : (cli?.cf||''),
+              piva:       ix.piva>=0 ? (cols[ix.piva]||'').trim() : (cli?.piva||''),
+              contact:    ix.contact>=0 ? (cols[ix.contact]||'').trim() : (cli?.contact||''),
+              email:      ix.email>=0 ? (cols[ix.email]||'').trim() : (cli?.email||''),
+              phone:      ix.phone>=0 ? (cols[ix.phone]||'').trim() : (cli?.phone||''),
+              paymentDesc:ix.payDesc>=0 ? (cols[ix.payDesc]||'').trim() : (cli?.paymentDesc||''),
+              priceCode:  ix.priceCode>=0 ? (cols[ix.priceCode]||'').trim() : (cli?.priceCode||''),
+              priceDesc:  ix.priceDesc>=0 ? (cols[ix.priceDesc]||'').trim() : (cli?.priceDesc||''),
+            };
+
+            if(cli){
+              Object.assign(cli, patch);
+              updated++;
+              }else{
+              list.push({
+                id:'C-'+Date.now()+Math.random().toString(36).slice(2,7),
+                ...patch,
+                tier: 'standard',      // compilata poi a mano
+                status: 'attivo',
+                goalMonthly: 0,
+                lastVisitDate: '',
+                nextVisitDate: '',
+                notes: ''
+              });
+              added++;
+            }
+          }
+    
+          setClients(list);
+          alert('Clienti importati: '+added+' — aggiornati: '+updated);
+    // ridisegna
+        renderClienti(document.getElementById('view'), query);
+      });
     }
+  }
 
     // ——— Visite ———
     function renderVisite(root){
@@ -1036,19 +1091,11 @@ if(btnIC){
         setFB({enabled, agentId, config:conf}); document.getElementById('fbStatus').textContent='Stato: impostazioni salvate';
       }
       async function fbConnect(){
-        try{
-          const fb=getFB(); if(!fb.enabled || !fb.config || !fb.agentId){ alert('Compila agent id, config e abilita'); return; }
-          document.getElementById('fbStatus').textContent='Stato: carico SDK...';
-          await loadFirebaseCDN();
-          if(!window._fbApp){ window._fbApp=firebase.initializeApp(fb.config); window._fbAuth=firebase.auth(); window._fbDB=firebase.firestore(); }
-          await window._fbAuth.signInAnonymously();
-          const uid = window._fbAuth.currentUser?.uid || '(anonimo)';
-          document.getElementById('fbStatus').textContent='Stato: connesso (UID '+uid+')';
-          alert('Connesso (Anonymous)');
-        }catch(err){
-          alert('SDK Firebase non caricato: '+(err?.message||err));
-          document.getElementById('fbStatus').textContent='Stato: errore SDK';
-        }
+        const ok = await ensureFirebaseConnected();
+        if(!ok){ alert('Compila agent id, config e abilita'); return; }
+        const uid = window._fbAuth.currentUser?.uid || '(anonimo)';
+        document.getElementById('fbStatus').textContent='Stato: connesso (UID '+uid+')';
+        alert('Connesso (Anonymous)');
       }
       async function fbTest(){
         try{
