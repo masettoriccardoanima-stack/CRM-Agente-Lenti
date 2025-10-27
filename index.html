@@ -234,34 +234,26 @@
       let clients=getClients(); const s=getSettings();
       function filtered(){return clients.filter(c=>!q||JSON.stringify(c).toLowerCase().includes((q||'').toLowerCase()))}
       function row(c){
-      const s=getSettings();
-      const freq=tierToFreq(c.tier||'standard',s);
-      const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate,freq):'');
-      const overdue=c.lastVisitDate&&new Date(addDays(c.lastVisitDate,freq))<new Date(today());
-    // Stato fatturato
-      const lastSale=lastSaleDateByClient()[c.id];
-      const over21 = !lastSale || daysBetween(lastSale, today())>21;
-      const statoHTML = over21
-        ? '<span class="pill bg-red-50 text-red-700 border-red-200">no fatt. &gt;21g</span>'
-        : '<span class="pill bg-emerald-50 text-emerald-700 border-emerald-200">ok</span>';
+  const s=getSettings();
+  const freq=tierToFreq(c.tier||'standard',s);
+  const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate,freq):'');
+  const overdue=c.lastVisitDate && new Date(addDays(c.lastVisitDate,freq)) < new Date(today());
 
-      return ['<tr class="border-b align-top">',
-        '<td class="px-2 py-2 font-mono">',c.code||'', '</td>',
-        '<td class="px-2 py-2"><div class="font-medium">',c.name,'</div><div class="text-xs text-slate-500">',(c.contact||''),' · ',(c.phone||''),'</div><div class="text-xs text-slate-500">',c.address||'', '</div></td>',
-        '<td class="px-2 py-2">',(c.city||''),' (',(c.prov||''),')</td>',
-        '<td class="px-2 py-2">',c.tier||'standard','</td>',
-        '<td class="px-2 py-2">',fmtDate(c.lastVisitDate),'</td>',
-        '<td class="px-2 py-2 ',(overdue?'text-red-600 font-semibold':''),'">',fmtDate(nextDefault),'</td>',
-        '<td class="px-2 py-2">',statoHTML,'</td>',
-        '<td class="px-2 py-2 text-right">', (c.goalMonthly?fmtEuro(c.goalMonthly):'-'),'</td>',
-        '<td class="px-2 py-2 text-right whitespace-nowrap">',
-          '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
-          '<button class="btn" data-notes="',c.id,'">Note</button> ',
-          '<button class="btn" data-promo="',c.id,'">Promo</button> ',
-          '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
-        '</td>',
-      '</tr>'].join('');
-      }
+  return ['<tr class="border-b align-top">',
+    '<td class="px-2 py-2 font-mono">', c.code||'', '</td>',
+    '<td class="px-2 py-2"><div class="font-medium">', c.name, '</div>',
+       '<div class="text-xs text-slate-500">', (c.contact||''), '</div></td>',
+    '<td class="px-2 py-2">', (c.city||''), ' (', (c.prov||''), ')</td>',
+    '<td class="px-2 py-2">', c.tier||'standard', '</td>',
+    '<td class="px-2 py-2 ', (overdue?'text-red-600 font-semibold':''), '">', fmtDate(c.lastVisitDate), '</td>',
+    '<td class="px-2 py-2 text-right whitespace-nowrap">',
+      '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
+      '<button class="btn" data-notes="',c.id,'">Note</button> ',
+      '<button class="btn" data-promo="',c.id,'">Promo</button> ',
+      '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
+    '</td>',
+  '</tr>'].join('');
+}
 
       function paint(){
         const list=filtered();
@@ -300,13 +292,19 @@
             '</div>',
             '</div>',
             '</div>',
-            '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Elenco clienti</h3></div>',
-            '<div class=\"card-b overflow-auto\">',
-              '<table class=\"min-w-full text-sm\"><thead class=\"bg-slate-100 text-slate-600\"><tr>',
-              '<th class=\"text-left px-2 py-2\">Codice</th><th class=\"text-left px-2 py-2\">Cliente</th><th class=\"text-left px-2 py-2\">Località</th>',
-              '<th class="text-left px-2 py-2">Tier</th><th class="text-left px-2 py-2">Ult. visita</th><th class="text-left px-2 py-2">Prossima</th><th class="text-left px-2 py-2">Stato</th>',
-              '<th class="text-right px-2 py-2">Obiettivo</th><th class="px-2 py-2"></th>',
-              '</tr></thead><tbody>', list.map(row).join('') ,'</tbody></table>',
+    // --- CARD: Elenco clienti (sostituisci tutto questo blocco) ---
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Elenco clienti</h3></div>',
+              '<div class="card-b overflow-auto">',
+              '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+                '<th class="text-left px-2 py-2">Codice</th>',
+                '<th class="text-left px-2 py-2">Cliente</th>',
+                '<th class="text-left px-2 py-2">Località</th>',
+                '<th class="text-left px-2 py-2">Tier</th>',
+                '<th class="text-left px-2 py-2">Ult. visita</th>',
+                '<th class="px-2 py-2"></th>',  // colonna azioni
+              '</tr></thead><tbody>', 
+                list.map(row).join(''),
+              '</tbody></table>',
             '</div></div>',
           '</div>'
         ].join('');
@@ -323,60 +321,79 @@
       render();
       }));      
     const btnIC = root.querySelector('#importClients');
-      if(btnIC){
-        btnIC.addEventListener('click', async ()=>{
-        const f = root.querySelector('#fileClients').files?.[0];
-        if(!f){ alert('Seleziona un CSV'); return; }
+if(btnIC){
+  btnIC.addEventListener('click', async ()=>{
+    const f = root.querySelector('#fileClients').files?.[0];
+    if(!f){ alert('Seleziona un CSV'); return; }
 
-        // ri-usa il parser già presente in Fatturati
-        const text = await f.text();
-        const tab = parseCSV(text);
-        const H = tab.header.map(h=>h.trim().toLowerCase());
-        
-        const pick = (row, keys) => {
-          for(const k of keys){
-          const i = H.indexOf(k);
-          if(i>=0 && row[i]!=null) return String(row[i]).trim();
-        }
-        return '';
-      };
+    const text = await f.text();
+    const tab = parseCSV(text);
 
-      let list = getClients(); let added=0;
-      tab.rows.forEach(r=>{
-        const name = pick(r,['ragione sociale','cliente','nome']);
-        if (!name) return;
-        const code = pick(r,['codice','codice cliente']);
-        const piva = pick(r,['p.iva','piva','partita iva']);
-        const address = pick(r,['indirizzo','address']);
-        const city = pick(r,['città','citta','city']);
-        const cap = pick(r,['cap','zip']);
-        const prov = pick(r,['provincia','prov']);
-        const region = pick(r,['regione','region']);
-        const phone = pick(r,['telefono','phone']);
-        const email = pick(r,['email','mail']);
-        const contact = pick(r,['contatto','referente']);
-        const tier = (pick(r,['tier','classe','segmento'])||'').toLowerCase() || 'standard';
-        const status = (pick(r,['stato','status'])||'attivo').toLowerCase();
-        const goalMonthly = Number((pick(r,['obiettivo','obiettivo mensile','goal'])||'0').replace(',','.'))||0;
-        const prepagatoRenewal = pick(r,['rinnovo','rinnovo carnet','scadenza carnet']);
+    // Normalizza i nomi colonna per match robusto (ignora maiuscole, accenti, punti, spazi)
+    const norm = s => String(s||'').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // rimuovi accenti
+      .replace(/[^a-z0-9]/g,'');                         // lascia solo a-z0-9
+    const H = tab.header.map(h=>h.trim());
+    const HN = H.map(norm);
+    const find = (...aliases) => {
+      const A = aliases.map(norm);
+      for(let i=0;i<HN.length;i++){ if(A.includes(HN[i])) return i; }
+      return -1;
+    };
+    const pick = (row, ...aliases) => {
+      const i = find(...aliases);
+      return i>=0 ? String(row[i]??'').trim() : '';
+    };
 
-        // upsert su code o su nome
-      let c = list.find(x=> (code && x.code===code) || x.name.toLowerCase()===name.toLowerCase());
-        if(!c){
-        c = {id:'C-'+Date.now()+Math.random().toString(36).slice(2,6), code, name, piva, address, city, cap, prov, region,
-             phone, email, contact, tier, status, goalMonthly, prepagatoRenewal, lastVisitDate:'', nextVisitDate:'', notes:''};
-          list.push(c); added++;
-        }else{
-          Object.assign(c, {code, piva, address, city, cap, prov, region, phone, email, contact, tier, status, goalMonthly, prepagatoRenewal});
-        }
-        });
+    let list = getClients();
+    let added=0, updated=0;
 
-          setClients(list);
-          alert('Clienti importati/aggiornati: '+added);
-      // ridisegna lista clienti
-          renderClienti(document.getElementById('view'), query);
-        });
-    }
+    tab.rows.forEach(r=>{
+      // Campi richiesti
+      const code        = pick(r,'codicecliente','codcliente','codice');
+      const name        = pick(r,'ragionesociale','estragionesociale','cliente','nome');
+      if(!name && !code) return; // riga vuota
+
+      const address     = pick(r,'indirizzo','address');
+      const cap         = pick(r,'cap','capcliente','zip');
+      const city        = pick(r,'localita','comune','citta');
+      const prov        = pick(r,'provincia','prov');
+      const cf          = pick(r,'codicefiscale','cf');
+      const piva        = pick(r,'partitaiva','piva','piva');
+      const contact     = pick(r,'personadiriferimento','contatto','referente');
+      const paymentDesc = pick(r,'despagamento','despagam','descrizionepagamento');
+      const listinoCode = pick(r,'codlistino','codicelistino','listino');
+
+      // Upsert: prima per codice, altrimenti per ragione sociale
+      let c = list.find(x =>
+        (code && (x.code||'').toLowerCase()===code.toLowerCase()) ||
+        (!code && x.name && x.name.toLowerCase()===String(name).toLowerCase())
+      );
+
+      if(!c){
+        c = {
+          id: 'C-'+Date.now()+Math.random().toString(36).slice(2,6),
+          code, name, address, cap, city, prov, cf, piva,
+          contact, paymentDesc, listinoCode,
+          status: 'attivo',
+          tier: 'standard',
+          goalMonthly: 0,
+          lastVisitDate: '',
+          nextVisitDate: '',
+          notes: ''
+        };
+        list.push(c); added++;
+      }else{
+        Object.assign(c, {code,name,address,cap,city,prov,cf,piva,contact,paymentDesc,listinoCode});
+        updated++;
+      }
+    });
+
+    setClients(list);
+    alert('Clienti importati: '+added+' — aggiornati: '+updated);
+    renderClienti(document.getElementById('view'), query);
+  });
+}
 
     }
 
