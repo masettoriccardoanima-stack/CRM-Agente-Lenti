@@ -771,77 +771,112 @@
 
     // ——— Agenda ———
     function renderAgenda(root){
-      let tours=getTours(); const s=getSettings();
-      function dueCandidates(prov){
-        const now=today();
-        return getClients().filter(c=> (!prov || c.prov===prov) && (
-          !c.lastVisitDate || new Date(addDays(c.lastVisitDate,tierToFreq(c.tier||'standard',s))) <= new Date(addDays(now,7))
-        ));
-      }
-      function googleMapsLink(origin, stops){
-        const enc = s=>encodeURIComponent(s||'');
-        if(!stops.length) return '#';
-        const originQ = enc((origin || s.baseCity || 'Padova'));
-        const dest = enc((stops[stops.length-1].address||stops[stops.length-1].city||'').trim());
-        const way = stops.slice(0, Math.max(0,stops.length-1)).map(x=> enc((x.address||x.city||'').trim()) ).join('|');
-        let url='https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+originQ+'&destination='+dest;
-        if(way) url+='&waypoints='+way;
-        return url;
-      }
-      function paint(){
-        root.innerHTML=[
-          '<div class=\"space-y-4\">',
-            '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Nuovo giro</h3></div>',
-              '<div class=\"card-b\">',
-                '<form id="fTour" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
-                  '<input class="border rounded-xl px-3 py-2" type="date" name="date" value="', today() ,'">',
-                  '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" placeholder="Nome giro (es. Padova nord)">',
-                  '<select class="border rounded-xl px-3 py-2" name="prov"><option value="">Tutte le province</option>',
-                    provOpts,
-                  '</select>',
-                  '<input class="border rounded-xl px-3 py-2" type="number" name="perDay" value="4" placeholder="Stop per giorno">',
-                  '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="origin" placeholder="Partenza da (es. Prato della Valle, Padova)">',
-                  '<input class="border rounded-xl px-3 py-2" type="time" name="startTime" value="08:30">',
-                  '<div class="md:col-span-6 text-right"><button class="btn-primary">Crea</button></div>',
-                '</form>',
-              '</div>',
-            '</div>',
-            '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Giri pianificati</h3></div>',
-              '<div class=\"card-b\" id=\"toursList\"></div>',
-            '</div>',
-          '</div>'
-        ].join('');
+  let tours = getTours();
 
-        const list=root.querySelector('#toursList');
-        list.innerHTML = tours.length ? tours.map(t => {
-          const stops=(t.stops||[]).map((st,i)=> (i+1)+'. '+(getClients().find(c=>c.id===st.clientId)||{}).name ).join('<br>');
-          const url=googleMapsLink(t.origin || getSettings().baseCity, (t.stops||[]).map(st=>getClients().find(c=>c.id===st.clientId)||{}));
-          return ['<div class=\"border rounded-xl p-3 mb-3\">',
-            '<div class=\"flex items-center justify-between\"><div><div class=\"font-medium\">',t.name||('Giro '+t.date),'</div><div class=\"text-xs text-slate-500\">',fmtDate(t.date),'</div></div>',
-            '<div class=\"space-x-2\"><a class=\"btn\" target=\"_blank\" href=\"',url,'\">Apri in Google Maps</a><button class=\"btn\" data-edit=\"',t.id,'\">Modifica</button><button class=\"btn text-red-600 border-red-300 hover:bg-red-50\" data-del=\"',t.id,'\">Elimina</button></div></div>',
-            '<div class=\"mt-2 text-sm\">',stops||'—','</div>',
-          '</div>'].join('');
-        }).join('') : '<div class=\"text-sm text-slate-600\">Nessun giro salvato</div>';
+  function dueCandidates(prov){
+    const s=getSettings(), now=today();
+    return getClients().filter(c =>
+      (!prov || c.prov===prov) &&
+      (!c.lastVisitDate || new Date(addDays(c.lastVisitDate,tierToFreq(c.tier||'standard',s))) <= new Date(addDays(now,7)))
+    );
+  }
+  function googleMapsLink(origin, stops){
+    const enc=s=>encodeURIComponent(s||'');
+    if(!stops.length) return '#';
+    const s=getSettings();
+    const originQ=enc(origin || s.baseCity || 'Padova');
+    const dest=enc((stops[stops.length-1].address||stops[stops.length-1].city||'').trim());
+    const way=stops.slice(0,Math.max(0,stops.length-1)).map(x=>enc((x.address||x.city||'').trim())).join('|');
+    let url='https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+originQ+'&destination='+dest;
+    if(way) url+='&waypoints='+way;
+    return url;
+  }
 
-        list.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ const id=b.getAttribute('data-del'); if(confirm('Eliminare giro?')){ tours=tours.filter(x=>x.id!==id); setTours(tours); paint(); } }));
-        list.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{ const id=b.getAttribute('data-edit'); editTour(id); }));
+  function paint(){
+    const provOpts = Object.values(TRIVENETO).flat()
+      .map(p => `<option value="${p}">${p}</option>`).join('');
 
-        const f=root.querySelector('#fTour');
-          f.addEventListener('submit', e=>{
-          e.preventDefault(); const data=Object.fromEntries(new FormData(f).entries());
-        const prov=data.prov||''; const perDay=Math.max(1, Number(data.perDay||4));
-        const candidates=dueCandidates(prov);
-        const groups=[]; for(let i=0;i<candidates.length;i+=perDay){ groups.push(candidates.slice(i,i+perDay)); }
-        const firstGroup = groups[0]||[];
-        const t={id:nextId('T'), date:data.date, name:data.name||('Giro '+data.date), prov,
-                origin:(data.origin||getSettings().baseCity||'Padova'), startTime:(data.startTime||'08:30'),
-                stops:firstGroup.map(c=>({clientId:c.id}))};
-        const tours=getTours(); tours.unshift(t); setTours(tours);
-        paint();
-        alert('Giro creato con '+(firstGroup.length)+' tappe. Partenza '+t.origin+' ore '+t.startTime);
-      });
-      }
+    root.innerHTML = `
+      <div class="space-y-4">
+        <div class="card">
+          <div class="card-h"><h3 class="font-semibold">Nuovo giro</h3></div>
+          <div class="card-b">
+            <form id="fTour" class="grid grid-cols-1 md:grid-cols-6 gap-3">
+              <input class="border rounded-xl px-3 py-2" type="date" name="date" value="${today()}">
+              <input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" placeholder="Nome giro (es. Padova nord)">
+              <select class="border rounded-xl px-3 py-2" name="prov">
+                <option value="">Tutte le province</option>
+                ${provOpts}
+              </select>
+              <input class="border rounded-xl px-3 py-2" type="number" name="perDay" value="4" placeholder="Stop per giorno">
+              <input class="border rounded-xl px-3 py-2 md:col-span-2" name="origin" placeholder="Partenza da (es. Prato della Valle, Padova)">
+              <input class="border rounded-xl px-3 py-2" type="time" name="startTime" value="08:30">
+              <div class="md:col-span-6 text-right"><button class="btn-primary">Crea</button></div>
+            </form>
+          </div>
+        </div>
 
+        <div class="card">
+          <div class="card-h"><h3 class="font-semibold">Giri pianificati</h3></div>
+          <div class="card-b" id="toursList"></div>
+        </div>
+      </div>
+    `;
+
+    // Lista giri
+    const list = root.querySelector('#toursList');
+    list.innerHTML = tours.length ? tours.map(t => {
+      const stops=(t.stops||[]).map((st,i)=> (i+1)+'. '+(getClients().find(c=>c.id===st.clientId)||{}).name).join('<br>');
+      const url=googleMapsLink(t.origin || getSettings().baseCity, (t.stops||[]).map(st=>getClients().find(c=>c.id===st.clientId)||{}));
+      return `
+        <div class="border rounded-xl p-3 mb-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="font-medium">${t.name || ('Giro '+t.date)}</div>
+              <div class="text-xs text-slate-500">${fmtDate(t.date)}</div>
+            </div>
+            <div class="space-x-2">
+              <a class="btn" target="_blank" href="${url}">Apri in Google Maps</a>
+              <button class="btn" data-edit="${t.id}">Modifica</button>
+              <button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="${t.id}">Elimina</button>
+            </div>
+          </div>
+          <div class="mt-2 text-sm">${stops || '—'}</div>
+        </div>`;
+    }).join('') : '<div class="text-sm text-slate-600">Nessun giro salvato</div>';
+
+    // Azioni lista
+    list.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
+      const id=b.getAttribute('data-del');
+      if(confirm('Eliminare giro?')){ tours=tours.filter(x=>x.id!==id); setTours(tours); paint(); }
+    }));
+    list.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{
+      const id=b.getAttribute('data-edit'); editTour(id);
+    }));
+
+    // Submit nuovo giro
+    root.querySelector('#fTour').addEventListener('submit', e=>{
+      e.preventDefault();
+      const data=Object.fromEntries(new FormData(e.target).entries());
+      const prov = data.prov || '';
+      const perDay = Math.max(1, Number(data.perDay||4));
+      const candidates = dueCandidates(prov);
+      const firstGroup = candidates.slice(0, perDay);
+
+      const t = {
+        id: nextId('T'),
+        date: data.date,
+        name: data.name || ('Giro '+data.date),
+        prov,
+        origin: (data.origin || getSettings().baseCity || 'Padova'),
+        startTime: (data.startTime || '08:30'),
+        stops: firstGroup.map(c=>({clientId:c.id}))
+      };
+      tours = getTours(); tours.unshift(t); setTours(tours);
+      paint();
+      alert('Giro creato con '+firstGroup.length+' tappe. Partenza '+t.origin+' ore '+t.startTime);
+    });
+  }
       function editTour(id){
         const t=(getTours().find(x=>x.id===id)); if(!t){ paint(); return; }
         const prov=t.prov||''; const candidates=getClients().filter(c=>!prov || c.prov===prov);
