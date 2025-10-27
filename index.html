@@ -72,14 +72,21 @@
 async function ensureFirebaseConnected(){
   const fb=getFB();
   if(!fb.enabled || !fb.config || !fb.agentId) return false;
-  if(!window._fbDB){
-    await loadFirebaseCDN();
-    if(!window._fbApp){
-      window._fbApp=firebase.initializeApp(fb.config);
-      window._fbAuth=firebase.auth();
-      window._fbDB=firebase.firestore();
-    }
-    if(!window._fbAuth.currentUser) await window._fbAuth.signInAnonymously();
+  await loadFirebaseCDN();
+  if(!window._fbApp){
+    window._fbApp=firebase.initializeApp(fb.config);
+    window._fbAuth=firebase.auth();
+    window._fbDB=firebase.firestore();
+  }
+  if(window._fbAuth.currentUser) return true;
+
+  if(fb.authMode==='password'){
+    // prova a usare email + password se disponibili (senza salvare su LS)
+    const pass = document.getElementById('fbPass')?.value || window._fbPassword || '';
+    if(!fb.email || !pass) return false; // manca password: non fare fallback anonimo
+    await window._fbAuth.signInWithEmailAndPassword(fb.email, pass);
+  }else{
+    await window._fbAuth.signInAnonymously();
   }
   return !!window._fbDB;
 }
@@ -167,6 +174,7 @@ async function ensureFirebaseConnected(){
     function openDrawer(open){ document.getElementById('drawer').classList.toggle('open', !!open); document.getElementById('scrim').classList.toggle('show', !!open); }
 
     const app=document.getElementById('app'); let route='dashboard', query='';
+    window._openClientId = null; 
     function layout(){
       app.innerHTML=[
         '<div class=\"min-h-screen\">',
@@ -294,209 +302,317 @@ async function ensureFirebaseConnected(){
 
     // ——— Clienti ———
     function renderClienti(root,q){
-      let clients=getClients(); const s=getSettings();
-      function filtered(){return clients.filter(c=>!q||JSON.stringify(c).toLowerCase().includes((q||'').toLowerCase()))}
-      function row(c){
-  const s=getSettings();
-  const freq=tierToFreq(c.tier||'standard',s);
-  const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate,freq):'');
-  const overdue=c.lastVisitDate && new Date(addDays(c.lastVisitDate,freq)) < new Date(today());
+  let clients=getClients();
 
-  return ['<tr class="border-b align-top">',
-    '<td class="px-2 py-2">' +
-  '<a href="#" data-open="'+c.id+'" class="font-medium text-blue-600 hover:underline">'+c.name+'</a>' +
-  '<div class="text-xs text-slate-500">'+(c.contact||'')+'</div>' +
-  '</td>',
+  function filtered(){
+    return clients.filter(c=>!q || JSON.stringify(c).toLowerCase().includes((q||'').toLowerCase()));
+  }
 
-    '<td class="px-2 py-2">', (c.city||''), ' (', (c.prov||''), ')</td>',
-    '<td class="px-2 py-2">', c.tier||'standard', '</td>',
-    '<td class="px-2 py-2 ', (overdue?'text-red-600 font-semibold':''), '">', fmtDate(c.lastVisitDate), '</td>',
-    '<td class="px-2 py-2 text-right whitespace-nowrap">',
-      '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
-      '<button class="btn" data-notes="',c.id,'">Note</button> ',
-      '<button class="btn" data-promo="',c.id,'">Promo</button> ',
-      '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
-    '</td>',
-  '</tr>'].join('');
-}
+  function row(c){
+    const s=getSettings();
+    const freq=tierToFreq(c.tier||'standard',s);
+    const overdue = c.lastVisitDate && new Date(addDays(c.lastVisitDate,freq)) < new Date(today());
+    return [
+      '<tr class="border-b align-top">',
+        '<td class="px-2 py-2 font-mono">', (c.code||''), '</td>',
+        '<td class="px-2 py-2">',
+          '<a href="#" data-open="',c.id,'" class="font-medium text-blue-600 hover:underline">', c.name ,'</a>',
+          '<div class="text-xs text-slate-500">', (c.contact||''), '</div>',
+        '</td>',
+        '<td class="px-2 py-2">', (c.city||''),' (',(c.prov||''),')</td>',
+        '<td class="px-2 py-2">',
+          '<select data-tier="',c.id,'" class="border rounded-xl px-2 py-1">',
+            ['nuovo','standard','importante'].map(t=>'<option '+(t===(c.tier||'standard')?'selected':'')+'>'+t+'</option>').join(''),
+          '</select>',
+        '</td>',
+        '<td class="px-2 py-2 ',(overdue?'text-red-600 font-semibold':''),'">', fmtDate(c.lastVisitDate)||'—','</td>',
+        '<td class="px-2 py-2 text-right whitespace-nowrap">',
+          '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
+          '<button class="btn" data-notes="',c.id,'">Note</button> ',
+          '<button class="btn" data-promo="',c.id,'">Promo</button> ',
+          '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
+        '</td>',
+      '</tr>'
+    ].join('');
+  }
 
-      function paint(){
-        const list=filtered();
-        root.innerHTML=[
-          '<div class=\"space-y-4\">',
-            '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Nuovo cliente</h3></div>',
-            '<div class=\"card-b\">',
-              '<form id=\"fNew\" class=\"grid grid-cols-1 md:grid-cols-6 gap-3\">',
-                '<input class=\"border rounded-xl px-3 py-2\" name=\"code\" placeholder=\"Codice\">',
-                '<input class=\"border rounded-xl px-3 py-2 md:col-span-2\" name=\"name\" placeholder=\"Ragione sociale\">',
-                '<input class=\"border rounded-xl px-3 py-2\" name=\"piva\" placeholder=\"P.IVA\">',
-                '<input class=\"border rounded-xl px-3 py-2\" name=\"contact\" placeholder=\"Contatto\">',
-                '<input class=\"border rounded-xl px-3 py-2\" name=\"phone\" placeholder=\"Telefono\">',
-                '<input class=\"border rounded-xl px-3 py-2\" name=\"email\" placeholder=\"Email\">',
-                '<input class=\"border rounded-xl px-3 py-2 md:col-span-3\" name=\"address\" placeholder=\"Indirizzo\">',
-                '<input class=\"border rounded-xl px-3 py-2\" name=\"city\" placeholder=\"Città\">',
-                '<select class=\"border rounded-xl px-3 py-2\" name=\"prov\">',Object.values(TRIVENETO).flat().map(p=>'<option>'+p+'</option>').join(''),'</select>',
-                '<select class=\"border rounded-xl px-3 py-2\" name=\"region\">',Object.keys(TRIVENETO).map(r=>'<option>'+r+'</option>').join(''),'</select>',
-                '<select class=\"border rounded-xl px-3 py-2\" name=\"status\">',['lead','attivo','sospeso','perso'].map(s=>'<option>'+s+'</option>').join(''),'</select>',
-                '<select class=\"border rounded-xl px-3 py-2\" name=\"tier\">',['nuovo','standard','importante'].map(t=>'<option>'+t+'</option>').join(''),'</select>',
-                '<input class=\"border rounded-xl px-3 py-2\" type=\"number\" step=\"0.01\" name=\"goalMonthly\" placeholder=\"Obiettivo € mensile\">',
-                '<input class=\"border rounded-xl px-3 py-2\" type=\"date\" name=\"prepagatoRenewal\" placeholder=\"Rinnovo carnet/prepagato\">',
-                '<div class=\"md:col-span-6\"><textarea class=\"border rounded-xl px-3 py-2 w-full\" name=\"notes\" placeholder=\"Note cliente\"></textarea></div>',
-                '<div class=\"md:col-span-6 text-right\"><button class=\"btn-primary\">Aggiungi</button></div>',
-              '</form>',            
-            '</div></div>',
-            '<div class="card">',
-              '<div class="card-h"><h3 class="font-semibold">Import clienti (CSV)</h3></div>',
-              '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
-                '<input id="fileClients" type="file" accept=".csv,text/csv" class="md:col-span-3">',
-                '<div class="md:col-span-3 text-right">',
-                  '<button id="importClients" class="btn">Importa</button>',
-                '</div>',
-              '<div class="md:col-span-6 text-xs text-slate-500">',
-              'Riconosce intestazioni comuni: Ragione sociale/Cliente, P.IVA, Codice, Indirizzo, Città, CAP, Provincia, Regione, Telefono, Email, Contatto, Tier, Stato, Obiettivo, Rinnovo (YYYY-MM-DD).',
+  function paint(){
+    const list=filtered();
+    root.innerHTML=[
+      '<div class="space-y-4">',
+
+        // — Nuovo cliente
+        '<div class="card"><div class="card-h"><h3 class="font-semibold">Nuovo cliente</h3></div>',
+        '<div class="card-b">',
+          '<form id="fNew" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+            '<input class="border rounded-xl px-3 py-2" name="code" placeholder="Codice">',
+            '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" placeholder="Ragione sociale">',
+            '<input class="border rounded-xl px-3 py-2" name="piva" placeholder="P.IVA">',
+            '<input class="border rounded-xl px-3 py-2" name="contact" placeholder="Contatto">',
+            '<input class="border rounded-xl px-3 py-2" name="phone" placeholder="Telefono">',
+            '<input class="border rounded-xl px-3 py-2" name="email" placeholder="Email">',
+            '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="address" placeholder="Indirizzo">',
+            '<input class="border rounded-xl px-3 py-2" name="city" placeholder="Città">',
+            '<select class="border rounded-xl px-3 py-2" name="prov">',Object.values(TRIVENETO).flat().map(p=>'<option>'+p+'</option>').join(''),'</select>',
+            '<select class="border rounded-xl px-3 py-2" name="region">',Object.keys(TRIVENETO).map(r=>'<option>'+r+'</option>').join(''),'</select>',
+            '<select class="border rounded-xl px-3 py-2" name="status">',['lead','attivo','sospeso','perso'].map(s=>'<option>'+s+'</option>').join(''),'</select>',
+            '<select class="border rounded-xl px-3 py-2" name="tier">',['nuovo','standard','importante'].map(t=>'<option>'+t+'</option>').join(''),'</select>',
+            '<input class="border rounded-xl px-3 py-2" type="number" step="0.01" name="goalMonthly" placeholder="Obiettivo € mensile">',
+            '<input class="border rounded-xl px-3 py-2" type="date" name="prepagatoRenewal" placeholder="Rinnovo carnet/prepagato">',
+            '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="notes" placeholder="Note cliente"></textarea></div>',
+            '<div class="md:col-span-6 text-right"><button class="btn-primary">Aggiungi</button></div>',
+          '</form>',
+        '</div></div>',
+
+        // — Import clienti
+        '<div class="card">',
+          '<div class="card-h"><h3 class="font-semibold">Import clienti (CSV)</h3></div>',
+          '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
+            '<input id="fileClients" type="file" accept=".csv,text/csv" class="md:col-span-3">',
+            '<div class="md:col-span-3 text-right">',
+              '<button id="importClients" class="btn">Importa</button>',
             '</div>',
+            '<div class="md:col-span-6 text-xs text-slate-500">',
+              'Riconosce intestazioni comuni: Codice Cliente, Ragione Sociale, Indirizzo, CAP, Località, Provincia, Codice Fiscale, Partita IVA, Persona di riferimento, Des. Pagamento, Cod. Listino (CF0/VIP/VPS), Des. Listino.',
             '</div>',
-            '</div>',
-    // --- CARD: Elenco clienti (sostituisci tutto questo blocco) ---
-            '<div class="card"><div class="card-h"><h3 class="font-semibold">Elenco clienti</h3></div>',
-              '<div class="card-b overflow-auto">',
-              '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-                '<th class="text-left px-2 py-2">Codice</th>',
-                '<th class="text-left px-2 py-2">Cliente</th>',
-                '<th class="text-left px-2 py-2">Località</th>',
-                '<th class="text-left px-2 py-2">Tier</th>',
-                '<th class="text-left px-2 py-2">Ult. visita</th>',
-                '<th class="px-2 py-2"></th>',  // colonna azioni
-              '</tr></thead><tbody>', 
-                list.map(row).join(''),
-              '</tbody></table>',
-            '</div></div>',
-          '</div>'
-        ].join('');
+          '</div>',
+        '</div>',
 
-        const f=root.querySelector('#fNew'); f&&f.addEventListener('submit',e=>{e.preventDefault();const data=Object.fromEntries(new FormData(f).entries());const c={id:'C-'+Date.now(),...data,goalMonthly:Number(data.goalMonthly||0),lastVisitDate:'',nextVisitDate:'',notes:data.notes||''}; const all=[c, ...clients]; setClients(all); clients=all; paint();});
-        root.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{const id=b.getAttribute('data-del'); if(confirm('Eliminare cliente?')){ clients=clients.filter(x=>x.id!==id); setClients(clients); paint(); }}));
-        root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{const id=b.getAttribute('data-qv'); registerQuickVisit(id); clients=getClients(); paint(); }));
-        root.querySelectorAll('[data-notes]').forEach(b=>b.addEventListener('click',()=>{const id=b.getAttribute('data-notes'); const all=getClients(); const c=all.find(x=>x.id===id); const n=prompt('Note cliente:', c.notes||''); if(n!=null){ c.notes=n; setClients(all); alert('Note salvate'); }}));
+        // — Elenco clienti (colonne ridotte)
+        '<div class="card"><div class="card-h"><h3 class="font-semibold">Elenco clienti</h3></div>',
+        '<div class="card-b overflow-auto">',
+          '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+            '<th class="text-left px-2 py-2">Codice</th>',
+            '<th class="text-left px-2 py-2">Cliente</th>',
+            '<th class="text-left px-2 py-2">Località</th>',
+            '<th class="text-left px-2 py-2">Tier</th>',
+            '<th class="text-left px-2 py-2">Ult. visita</th>',
+            '<th class="px-2 py-2"></th>',
+          '</tr></thead><tbody>',
+            list.map(row).join(''),
+          '</tbody></table>',
+        '</div></div>',
+
+      '</div>'
+    ].join('');
+
+    // — Aggiungi nuovo cliente
+    const f=root.querySelector('#fNew');
+    if(f){
+      f.addEventListener('submit',e=>{
+        e.preventDefault();
+        const data=Object.fromEntries(new FormData(f).entries());
+        const c={id:'C-'+Date.now(),...data,goalMonthly:Number(data.goalMonthly||0),lastVisitDate:'',nextVisitDate:'',notes:data.notes||''};
+        const all=[c, ...clients]; setClients(all); clients=all; paint();
+      });
+    }
+
+    // — Azioni riga
+    root.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
+      const id=b.getAttribute('data-del');
+      if(confirm('Eliminare cliente?')){
+        clients=clients.filter(x=>x.id!==id); setClients(clients); paint();
       }
-      paint();
-      root.querySelectorAll('[data-promo]').forEach(b=>b.addEventListener('click',()=>{
-        window._promoClientPreselect = b.getAttribute('data-promo'); // id cliente
-        route='promo';
-      render();
-      }));      
+    }));
+    root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{
+      const id=b.getAttribute('data-qv'); registerQuickVisit(id); clients=getClients(); paint();
+    }));
+    root.querySelectorAll('[data-notes]').forEach(b=>b.addEventListener('click',()=>{
+      const id=b.getAttribute('data-notes'); const all=getClients(); const c=all.find(x=>x.id===id);
+      const n=prompt('Note cliente:', c.notes||''); if(n!=null){ c.notes=n; setClients(all); alert('Note salvate'); }
+    }));
+    // — Apri scheda cliente
+    root.querySelectorAll('[data-open]').forEach(a=>a.addEventListener('click',(e)=>{
+      e.preventDefault();
+      window._openClientId = a.getAttribute('data-open');
+      route='cliente'; render();
+    }));
+    // — Tier inline
+    root.querySelectorAll('[data-tier]').forEach(sel=>{
+      sel.addEventListener('change', ()=>{
+        const id = sel.getAttribute('data-tier');
+        const all = getClients();
+        const cli = all.find(x=>x.id===id);
+        if(cli){
+          cli.tier = sel.value;
+          setClients(all);
+        }
+      });
+    });
+
+    // — Import CSV (mappato sul tuo file)
     const btnIC = root.querySelector('#importClients');
-      if(btnIC){
-        btnIC.addEventListener('click', async ()=>{
-          const f = root.querySelector('#fileClients').files?.[0];
-          if(!f){ alert('Seleziona un CSV'); return; }
+    if(btnIC){
+      btnIC.addEventListener('click', async ()=>{
+        const file = root.querySelector('#fileClients').files?.[0];
+        if(!file){ alert('Seleziona un CSV'); return; }
+        const text = await file.text();
+        const lines = text.split(/\r?\n/).filter(l=>l.trim().length);
+        if(!lines.length){ alert('CSV vuoto'); return; }
 
-          const text = await f.text();
-          const lines = text.split(/\r?\n/).filter(l=>l.trim().length);
-          if(!lines.length){ alert('CSV vuoto'); return; }
+        const sep = lines[0].includes(';') ? ';' : ',';
+        const header = lines[0].split(sep).map(h=>h.trim());
 
-    // Delimitatore (il tuo file usa ";")
-          const sep = lines[0].includes(';') ? ';' : ',';
-          const header = lines[0].split(sep).map(h=>h.trim());
+        const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        const Hmap = Object.fromEntries(header.map((h,i)=>[norm(h), i]));
+        const idx = (...aliases)=>{ for(const a of aliases){ const i=Hmap[norm(a)]; if(i!=null) return i; } return -1; };
 
-    // Normalizza chiavi header (minuscole, senza accenti)
-          const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-          const Hmap = Object.fromEntries(header.map((h,i)=>[norm(h), i]));
+        const ix = {
+          code:      idx('Codice Cliente','codice'),
+          name:      idx('Ragione Sociale','cliente','nome'),
+          address:   idx('Indirizzo'),
+          cap:       idx('CAP'),
+          city:(()=>{ for(const [k,i] of Object.entries(Hmap)){ if(/^localit/.test(k)) return i; } return -1;})(),
+          prov:      idx('Provincia','prov'),
+          cf:        idx('Codice Fiscale'),
+          piva:      idx('Partita IVA','P.IVA','Partita Iva','piva'),
+          contact:   idx('Persona di riferimento','Referente','Contatto'),
+          email:     idx('Indirizzo email','Email','mail'),
+          phone:     idx('Telefono','tel'),
+          payDesc:   idx('Des. Pagamento','Descrizione Pagamento','Pagamento'),
+          priceCode: idx('Cod. Listino','Codice Listino'),
+          priceDesc: idx('Des. Listino','Descrizione Listino'),
+        };
 
-          const idx = (...aliases)=> {
-            for(const a of aliases){
-              const i = Hmap[norm(a)];
-              if(i!=null) return i;
-            }
-            return -1;
+        if(ix.code<0 && ix.name<0){
+          alert('CSV non riconosciuto: serve almeno "Codice Cliente" o "Ragione Sociale"'); return;
+        }
+
+        let list = getClients(); let added=0, updated=0;
+
+        for(let r=1;r<lines.length;r++){
+          const cols = lines[r].split(sep);
+          const code = ix.code>=0 ? (cols[ix.code]||'').trim() : '';
+          const name = ix.name>=0 ? (cols[ix.name]||'').trim() : '';
+          if(!code && !name) continue;
+
+          let cli = list.find(x => (code && x.code===code))
+                  || list.find(x => (ix.piva>=0 && (cols[ix.piva]||'').trim() && x.piva && x.piva.trim().toLowerCase()===(cols[ix.piva]||'').trim().toLowerCase()))
+                  || list.find(x => (name && x.name && x.name.trim().toLowerCase()===name.toLowerCase()));
+
+          const patch = {
+            code,
+            name,
+            address:    ix.address>=0 ? (cols[ix.address]||'').trim() : (cli?.address||''),
+            cap:        ix.cap>=0 ? (cols[ix.cap]||'').trim() : (cli?.cap||''),
+            city:       ix.city>=0 ? (cols[ix.city]||'').trim() : (cli?.city||''),
+            prov:       ix.prov>=0 ? (cols[ix.prov]||'').trim() : (cli?.prov||''),
+            cf:         ix.cf>=0 ? (cols[ix.cf]||'').trim() : (cli?.cf||''),
+            piva:       ix.piva>=0 ? (cols[ix.piva]||'').trim() : (cli?.piva||''),
+            contact:    ix.contact>=0 ? (cols[ix.contact]||'').trim() : (cli?.contact||''),
+            email:      ix.email>=0 ? (cols[ix.email]||'').trim() : (cli?.email||''),
+            phone:      ix.phone>=0 ? (cols[ix.phone]||'').trim() : (cli?.phone||''),
+            paymentDesc:ix.payDesc>=0 ? (cols[ix.payDesc]||'').trim() : (cli?.paymentDesc||''),
+            priceCode:  ix.priceCode>=0 ? (cols[ix.priceCode]||'').trim() : (cli?.priceCode||''),
+            priceDesc:  ix.priceDesc>=0 ? (cols[ix.priceDesc]||'').trim() : (cli?.priceDesc||''),
           };
 
-    // Indici colonne richieste
-          const ix = {
-            code:      idx('Codice Cliente'),
-            name:      idx('Ragione Sociale'),
-            address:   idx('Indirizzo'),
-            cap:       idx('CAP'),
-      // "Località" a volte appare come "Localit�": prendo la prima colonna che inizia con "localit"
-            city:      (()=>{
-                   for (const [k,i] of Object.entries(Hmap)){
-                     if(/^localit/.test(k)) return i;
-                   }
-                   return -1;
-                 })(),
-            prov:      idx('Provincia'),
-            cf:        idx('Codice Fiscale'),
-            piva:      idx('Partita IVA','P.IVA','Partita Iva'),
-            contact:   idx('Persona Di Riferimento','Referente'),
-            email:     idx('Indirizzo email','Email'),
-            phone:     idx('Telefono'),
-            payDesc:   idx('Des. Pagamento','Descrizione Pagamento','Pagamento'),
-            priceCode: idx('Cod. Listino','Codice Listino'),
-            priceDesc: idx('Des. Listino','Descrizione Listino'),
-          };
-
-          if(ix.code<0 && ix.name<0){
-            alert('CSV non riconosciuto: serve almeno "Codice Cliente" o "Ragione Sociale"');
-            return;
+          if(cli){ Object.assign(cli, patch); updated++; }
+          else{
+            list.push({
+              id:'C-'+Date.now()+Math.random().toString(36).slice(2,7),
+              ...patch,
+              tier:'standard', status:'attivo', goalMonthly:0,
+              lastVisitDate:'', nextVisitDate:'', notes:''
+            });
+            added++;
           }
+        }
 
-          let list = getClients();
-          let added = 0, updated = 0;
-
-          for(let r=1; r<lines.length; r++){
-            const cols = lines[r].split(sep);
-
-            const code = ix.code>=0 ? (cols[ix.code]||'').trim() : '';
-            const name = ix.name>=0 ? (cols[ix.name]||'').trim() : '';
-            if(!code && !name) continue;
-
-            // Trova esistente per priorità: codice -> P.IVA -> nome
-            let cli = list.find(x => (code && x.code===code))
-                    || list.find(x => (ix.piva>=0 && (cols[ix.piva]||'').trim() && x.piva && x.piva.trim().toLowerCase() === (cols[ix.piva]||'').trim().toLowerCase()))
-                    || list.find(x => (name && x.name && x.name.trim().toLowerCase()===name.toLowerCase()));
-
-            const patch = {
-              code,
-              name,
-              address:    ix.address>=0 ? (cols[ix.address]||'').trim() : (cli?.address||''),
-              cap:        ix.cap>=0 ? (cols[ix.cap]||'').trim() : (cli?.cap||''),
-              city:       ix.city>=0 ? (cols[ix.city]||'').trim() : (cli?.city||''),
-              prov:       ix.prov>=0 ? (cols[ix.prov]||'').trim() : (cli?.prov||''),
-              cf:         ix.cf>=0 ? (cols[ix.cf]||'').trim() : (cli?.cf||''),
-              piva:       ix.piva>=0 ? (cols[ix.piva]||'').trim() : (cli?.piva||''),
-              contact:    ix.contact>=0 ? (cols[ix.contact]||'').trim() : (cli?.contact||''),
-              email:      ix.email>=0 ? (cols[ix.email]||'').trim() : (cli?.email||''),
-              phone:      ix.phone>=0 ? (cols[ix.phone]||'').trim() : (cli?.phone||''),
-              paymentDesc:ix.payDesc>=0 ? (cols[ix.payDesc]||'').trim() : (cli?.paymentDesc||''),
-              priceCode:  ix.priceCode>=0 ? (cols[ix.priceCode]||'').trim() : (cli?.priceCode||''),
-              priceDesc:  ix.priceDesc>=0 ? (cols[ix.priceDesc]||'').trim() : (cli?.priceDesc||''),
-            };
-
-            if(cli){
-              Object.assign(cli, patch);
-              updated++;
-              }else{
-              list.push({
-                id:'C-'+Date.now()+Math.random().toString(36).slice(2,7),
-                ...patch,
-                tier: 'standard',      // compilata poi a mano
-                status: 'attivo',
-                goalMonthly: 0,
-                lastVisitDate: '',
-                nextVisitDate: '',
-                notes: ''
-              });
-              added++;
-            }
-          }
-    
-          setClients(list);
-          alert('Clienti importati: '+added+' — aggiornati: '+updated);
-    // ridisegna
-        renderClienti(document.getElementById('view'), query);
+        setClients(list);
+        alert('Clienti importati: '+added+' — aggiornati: '+updated);
+        renderClienti(document.getElementById('view'), q);
       });
     }
   }
+
+  paint();
+}
+
+
+  function renderCliente(root, id){
+  const all = getClients();
+  const c = all.find(x=>x.id===id);
+  if(!c){ root.innerHTML='<div class="card"><div class="card-b">Cliente non trovato</div></div>'; return; }
+
+  const provOpts = Object.values(TRIVENETO).flat()
+    .map(p=>'<option value="'+p+'" '+(p===(c.prov||'')?'selected':'')+'>'+p+'</option>').join('');
+
+  root.innerHTML = [
+    '<div class="space-y-4">',
+      '<div class="card"><div class="card-h">',
+        '<h3 class="font-semibold">Scheda cliente</h3>',
+        '<div><button id="back" class="btn">← Indietro</button></div>',
+      '</div>',
+      '<div class="card-b">',
+        '<form id="fCli" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+          '<input class="border rounded-xl px-3 py-2" name="code" value="'+(c.code||'')+'" placeholder="Codice">',
+          '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" value="'+(c.name||'')+'" placeholder="Ragione sociale">',
+          '<input class="border rounded-xl px-3 py-2" name="piva" value="'+(c.piva||'')+'" placeholder="Partita IVA">',
+          '<input class="border rounded-xl px-3 py-2" name="cf" value="'+(c.cf||'')+'" placeholder="Codice Fiscale">',
+          '<input class="border rounded-xl px-3 py-2" name="contact" value="'+(c.contact||'')+'" placeholder="Persona di riferimento">',
+          '<input class="border rounded-xl px-3 py-2" name="phone" value="'+(c.phone||'')+'" placeholder="Telefono">',
+          '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="email" value="'+(c.email||'')+'" placeholder="Email">',
+          '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="address" value="'+(c.address||'')+'" placeholder="Indirizzo">',
+          '<input class="border rounded-xl px-3 py-2" name="cap" value="'+(c.cap||'')+'" placeholder="CAP">',
+          '<input class="border rounded-xl px-3 py-2" name="city" value="'+(c.city||'')+'" placeholder="Località">',
+          '<select class="border rounded-xl px-3 py-2" name="prov">'+provOpts+'</select>',
+          '<input class="border rounded-xl px-3 py-2" name="region" value="'+(c.region||'')+'" placeholder="Regione">',
+          '<select class="border rounded-xl px-3 py-2" name="status">'+['lead','attivo','sospeso','perso'].map(s=>'<option '+(s===(c.status||'attivo')?'selected':'')+'>'+s+'</option>').join('')+'</select>',
+          '<select class="border rounded-xl px-3 py-2" name="tier">'+['nuovo','standard','importante'].map(t=>'<option '+(t===(c.tier||'standard')?'selected':'')+'>'+t+'</option>').join('')+'</select>',
+          '<input class="border rounded-xl px-3 py-2" type="number" step="0.01" name="goalMonthly" value="'+(c.goalMonthly||0)+'" placeholder="Obiettivo € mensile">',
+          // Listino (solo informativo, con datalist comodo)
+          '<input class="border rounded-xl px-3 py-2" name="paymentDesc" value="'+(c.paymentDesc||'')+'" placeholder="Des. pagamento">',
+          '<input class="border rounded-xl px-3 py-2" list="listini" name="priceCode" value="'+(c.priceCode||'')+'" placeholder="Codice listino (CF0, VIP, VPS)">',
+          '<datalist id="listini"><option value="CF0"><option value="VIP"><option value="VPS"></datalist>',
+          '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="priceDesc" value="'+(c.priceDesc||'')+'" placeholder="Descrizione listino (opz.)">',
+          '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="notes" placeholder="Note">'+(c.notes||'')+'</textarea></div>',
+          '<div class="md:col-span-6 flex items-center justify-between">',
+            '<div class="text-xs text-slate-600">Ultima visita: '+(fmtDate(c.lastVisitDate)||'—')+' · Prossima: '+(fmtDate(c.nextVisitDate)||'—')+'</div>',
+            '<div class="space-x-2">',
+              '<button type="button" id="quickVisit" class="btn">+ Visita rapida</button>',
+              '<button type="button" id="del" class="btn text-red-600 border-red-300 hover:bg-red-50">Elimina</button>',
+              '<button class="btn-primary">Salva</button>',
+            '</div>',
+          '</div>',
+        '</form>',
+      '</div></div>',
+    '</div>'
+  ].join('');
+
+  // back
+  document.getElementById('back').addEventListener('click', ()=>{ route='clienti'; render(); });
+
+  // salva
+  document.getElementById('fCli').addEventListener('submit', e=>{
+    e.preventDefault();
+    const form = Object.fromEntries(new FormData(e.target).entries());
+    Object.assign(c, {
+      code:form.code, name:form.name, piva:form.piva, cf:form.cf,
+      contact:form.contact, phone:form.phone, email:form.email,
+      address:form.address, cap:form.cap, city:form.city, prov:form.prov, region:form.region,
+      status:form.status, tier:form.tier, goalMonthly:Number(form.goalMonthly||0),
+      paymentDesc:form.paymentDesc, priceCode:form.priceCode, priceDesc:form.priceDesc,
+      notes:form.notes
+    });
+    setClients(all);
+    alert('Cliente salvato');
+  });
+
+  // visita rapida
+  document.getElementById('quickVisit').addEventListener('click', ()=>{
+    registerQuickVisit(c.id);
+    renderCliente(root, id); // aggiorna le date mostrate
+  });
+
+  // elimina
+  document.getElementById('del').addEventListener('click', ()=>{
+    if(confirm('Eliminare cliente?')){
+      setClients(all.filter(x=>x.id!==id));
+      route='clienti'; render();
+    }
+  });
+}
 
     // ——— Visite ———
     function renderVisite(root){
@@ -716,176 +832,339 @@ async function ensureFirebaseConnected(){
     }
     function normalizeAmount(s){ if(s==null) return 0; s=String(s).replace(/\\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
     function renderFatturati(root){
-      let sales=getSales(); let weekSales=getSalesW(); const clients=getClients();
-      const monthSel=yyyymm();
-      function sumByClientMonth(m){ const map={}; sales.filter(x=>x.month===m).forEach(x=>{ map[x.clientId]=(map[x.clientId]||0)+Number(x.amount||0); }); return map; }
-      function growth(clientId, m){ const [y,mm]=m.split('-').map(Number); const prev=(mm===1?(y-1):y)+'-'+String(mm===1?12:mm-1).padStart(2,'0'); const prevYoY=(y-1)+'-'+String(mm).padStart(2,'0');
-        const cur=sales.filter(s=>s.clientId===clientId && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0);
-        const prv=sales.filter(s=>s.clientId===clientId && s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
-        const yoy=sales.filter(s=>s.clientId===clientId && s.month===prevYoY).reduce((a,b)=>a+Number(b.amount||0),0);
-        return {cur,prv,delta:cur-prv,yoy,deltaY:cur-yoy, prevMonth:prev, prevYear:prevYoY};
-      }
-      function drawLine(canvasId, labels, series){
-        const c=document.getElementById(canvasId); if(!c) return; const ctx=c.getContext('2d'); const w=c.width= c.clientWidth; const h=c.height= 200;
-        ctx.clearRect(0,0,w,h);
-        const max=Math.max(1, ...series); const pad=20; const stepX=(w-2*pad)/Math.max(1,labels.length-1);
-        ctx.strokeStyle='#94a3b8'; ctx.beginPath(); ctx.moveTo(pad,h-pad); ctx.lineTo(w-pad,h-pad); ctx.stroke();
-        ctx.strokeStyle='#2563eb'; ctx.beginPath();
-        series.forEach((v,i)=>{ const x=pad+i*stepX; const y=h-pad - (v/max)*(h-2*pad); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
-        ctx.stroke(); ctx.fillStyle='#0f172a'; ctx.font='10px system-ui';
-        labels.forEach((l,i)=>{ const x=pad+i*stepX; ctx.fillText(l.slice(5), x-8, h-6); });
-      }
-      function paint(){
-        const month=document.getElementById('m')?document.getElementById('m').value:monthSel;
-        const sums=sumByClientMonth(month);
-        root.innerHTML=[
-          '<div class=\"space-y-4\">',
-            '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Import CSV</h3></div>',
-              '<div class=\"card-b grid grid-cols-1 md:grid-cols-6 gap-3\">',
-                '<select id=\"impType\" class=\"border rounded-xl px-3 py-2\"><option value=\"monthly\">Mensile (cliente,mese,importo)</option><option value=\"weekly\">Settimanale (cliente,week40,week41,...)</option></select>',
-                '<input id=\"impYear\" class=\"border rounded-xl px-3 py-2\" type=\"number\" placeholder=\"Anno (per settimanale)\">',
-                '<input id=\"impWeeks\" class=\"border rounded-xl px-3 py-2 md:col-span-2\" placeholder=\"Settimane (es. 40,41,42,43)\">',
-                '<input id=\"impFile\" type=\"file\" accept=\".csv,text/csv\" class=\"md:col-span-2\">',
-                '<div class=\"md:col-span-6 text-right\"><button id=\"doImport\" class=\"btn-primary\">Importa</button></div>',
-                '<div class=\"md:col-span-6 text-xs text-slate-500\">Nota: il parser evita duplicati sullo stesso cliente+mese o cliente+settimana.</div>',
-              '</div>',
-            '</div>',
-            '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Riepilogo mese</h3><div class=\"flex items-center gap-2\"><input id=\"m\" type=\"month\" value=\"',month,'\" class=\"border rounded-xl px-3 py-2\"></div></div>',
-            '<div class=\"card-b overflow-auto\">',
-              '<table class=\"min-w-full text-sm\"><thead class=\"bg-slate-100 text-slate-600\"><tr>',
-              '<th class=\"text-left px-2 py-2\">Cliente</th><th class=\"text-right px-2 py-2\">Obiettivo</th><th class=\"text-right px-2 py-2\">Fatturato</th><th class=\"text-left px-2 py-2\">Avanzamento</th><th class=\"text-right px-2 py-2\">Δ MoM</th><th class=\"text-right px-2 py-2\">Δ YoY</th>',
-              '</tr></thead><tbody id=\"rows\">', getClients().map(c=>{
-                const val=sums[c.id]||0; const goal=Number(c.goalMonthly||0); const pct=goal?Math.min(100,Math.round(100*val/goal)):null;
-                const g=(function(clientId, m){ const [y,mm]=m.split('-').map(Number); const prev=(mm===1?(y-1):y)+'-'+String(mm===1?12:mm-1).padStart(2,'0'); const prevYoY=(y-1)+'-'+String(mm).padStart(2,'0');
-                  const cur=getSales().filter(s=>s.clientId===clientId && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0);
-                  const prv=getSales().filter(s=>s.clientId===clientId && s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
-                  const yoy=getSales().filter(s=>s.clientId===clientId && s.month===prevYoY).reduce((a,b)=>a+Number(b.amount||0),0);
-                  return {cur,prv,delta:cur-prv,yoy,deltaY:cur-yoy, prevMonth:prev, prevYear:prevYoY};})(c.id, month);
-                const delta=g.delta; const deltaY=g.deltaY; const sign=delta>0?'+':''; const signY=deltaY>0?'+':'';
-                const bar='<div class=\"w-40 h-2 bg-slate-200 rounded-full overflow-hidden\"><div style=\"width:'+ (pct||0) +'%;height:100%\" class=\"bg-blue-500\"></div></div> ' + (pct!=null?(pct+'%'):'—');
-                return ['<tr class=\"border-b\">',
-                    '<td class=\"px-2 py-2\">',c.name,'</td>',
-                    '<td class=\"px-2 py-2 text-right\">',goal?fmtEuro(goal):'-','</td>',
-                    '<td class=\"px-2 py-2 text-right\">',fmtEuro(val),'</td>',
-                    '<td class=\"px-2 py-2\">',bar,'</td>',
-                    '<td class=\"px-2 py-2 text-right ',(delta<0?'text-red-600':(delta>0?'text-emerald-600':'')),'\">',sign,fmtEuro(delta),' (',g.prevMonth,')</td>',
-                    '<td class=\"px-2 py-2 text-right ',(deltaY<0?'text-red-600':(deltaY>0?'text-emerald-600':'')),'\">',signY,fmtEuro(deltaY),' (',g.prevYear,')</td>',
-                  '</tr>'].join('');
-              }).join(''),'</tbody></table>',
-              '<div class=\"mt-3 text-right\"><button id=\"exportCSV\" class=\"btn\">⬇️ Export CSV cliente×mese</button></div>',
-            '</div></div>',
-            '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Grafico mensile (totale)</h3></div>',
-              '<div class=\"card-b\"><canvas id=\"chartTot\" style=\"width:100%\"></canvas></div>',
-            '</div>',
-            '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Andamento cliente (YTD)</h3></div>',
-              '<div class=\"card-b\">',
-                '<div class=\"flex items-center gap-2 mb-3\">',
-                  '<select id=\"selClient\" class=\"border rounded-xl px-3 py-2\">', getClients().map(c=>'<option value=\"'+c.id+'\">'+c.name+'</option>').join('') ,'</select>',
-                  '<input id=\"yearYTD\" type=\"number\" value=\"', new Date().getFullYear() ,'\" class=\"border rounded-xl px-3 py-2\" style=\"width:120px\">',
-                '</div>',
-                '<canvas id=\"chartClient\" style=\"width:100%\"></canvas>',
-              '</div>',
-            '</div>',
-          '</div>'
-        ].join('');
+  let sales=getSales(); let weekSales=getSalesW(); const clients=getClients();
+  const monthSel=yyyymm();
 
-        const months=[]; const now=new Date(); for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); const ym=d.toISOString().slice(0,7); months.push(ym); }
-        const totals=months.map(m=> getSales().filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
-        drawLine('chartTot', months, totals);
-
-        function paintClientChart(){ const id=document.getElementById('selClient').value; const Y=Number(document.getElementById('yearYTD').value||now.getFullYear()); const labs=[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>Y+'-'+String(m).padStart(2,'0')); const ser=labs.map(m=> getSales().filter(s=>s.clientId===id && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0) ); drawLine('chartClient', labs, ser); }
-        document.getElementById('selClient').addEventListener('change',paintClientChart);
-        document.getElementById('yearYTD').addEventListener('input',paintClientChart);
-        paintClientChart();
-
-        document.getElementById('m').addEventListener('change', paint);
-        document.getElementById('exportCSV').addEventListener('click', ()=>{
-          const rows=[['client_code','client_name','month','amount']];
-          const mapName=Object.fromEntries(getClients().map(c=>[c.id,c.name])); const mapCode=Object.fromEntries(getClients().map(c=>[c.id,c.code||'']));
-          getSales().forEach(s=>{ rows.push([mapCode[s.clientId]||'', mapName[s.clientId]||'', s.month, String(s.amount||0)]); });
-          const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('\"'+String(v).replace('\"','\"\"')+'\"'):v).join(',')).join('\r\n');
-          const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clienti_mese.csv'; a.click();
-        });
-
-        document.getElementById('doImport').addEventListener('click', async ()=>{
-          const file=document.getElementById('impFile').files?.[0]; if(!file){ alert('Seleziona un CSV'); return; }
-          const type=document.getElementById('impType').value;
-          const text=await file.text(); const tab=parseCSV(text);
-          const h=tab.header.map(x=>x.toLowerCase());
-          const idx=(name)=> h.indexOf(name.toLowerCase());
-          function matchClient(name, code){
-            if(code){ const m=getClients().find(c=>(c.code||'').toLowerCase()===String(code).toLowerCase()); if(m) return m.id; }
-            if(name){ const m=getClients().find(c=>(c.name||'').toLowerCase()===String(name).toLowerCase()); if(m) return m.id; }
-            return null;
-          }
-          let changed=0;
-          if(type==='monthly'){
-            const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale');
-            const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
-            const im= idx('mese')>-1?idx('mese'): idx('month');
-            const ia= idx('importo')>-1?idx('importo'): idx('amount');
-            if(ic<0 || im<0 || ia<0){ alert('CSV mensile: servono colonne cliente, mese (YYYY-MM) e importo'); return; }
-            tab.rows.forEach(r=>{
-              const name=r[ic]?.trim(); const code=r[icode]?.trim(); const id=matchClient(name, code); if(!id) return;
-              const m=(r[im]||'').trim(); const amt=normalizeAmount(r[ia]);
-              if(!m || !amt) return;
-              setSales([...getSales(), {id:nextId('S'), clientId:id, month:m, amount:amt}]);
-              changed++;
-            });
-          } else {
-  const year=Number(document.getElementById('impYear').value||new Date().getFullYear());
-  const weeks=(document.getElementById('impWeeks').value||'').split(',').map(x=>Number(x.trim())).filter(Boolean);
-  if(!weeks.length){ alert('Specifica le settimane (es. 40,41,42,43)'); return; }
-  const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale')>-1?idx('ragione sociale'):0;
-  const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
-
-  // Copie mutabili
-  let salesWLocal=[...getSalesW()];
-  let salesLocal=[...getSales()];
-
-  // Per ricostruire mensile da settimane cambiate
-  const touchedPairs = new Set(); // `${clientId}|${month}`
-
-  tab.rows.forEach(r=>{
-    const name=r[ic]?.trim(); const code=r[icode]?.trim(); const id=matchClient(name, code); if(!id) return;
-    weeks.forEach(w=>{
-      let colIndex = h.findIndex(col => col.replace(/\s+/g,'').includes(String(w)));
-      if(colIndex<0) return;
-      const amt=normalizeAmount(r[colIndex]||0);
-      const date=isoWeekStart(year, w).toISOString().slice(0,10);
-      const monthKey=date.slice(0,7);
-      // UPsert settimanale (clientId+year+week)
-      const idxW = salesWLocal.findIndex(x=>x.clientId===id && x.year===year && x.week===w);
-      if(idxW>=0){
-        salesWLocal[idxW] = {...salesWLocal[idxW], amount:amt, dateISO:date};
-      } else {
-        salesWLocal.push({id:nextId('W'), clientId:id, year, week:w, dateISO:date, amount:amt});
-      }
-      touchedPairs.add(id+'|'+monthKey);
+  function sumByClientMonth(m){
+    const map={};
+    getSales().filter(x=>x.month===m).forEach(x=>{
+      map[x.clientId]=(map[x.clientId]||0)+Number(x.amount||0);
     });
-  });
+    return map;
+  }
 
-  // Ricostruisci record mensile "source:weekly" per i pair toccati
-  touchedPairs.forEach(pair=>{
-    const [cid, m] = pair.split('|');
-    const sumW = salesWLocal.filter(x=>x.clientId===cid && x.dateISO.slice(0,7)===m)
-                  .reduce((a,b)=>a+Number(b.amount||0),0);
-    // cerca un record mensile marcato come derivato dalle settimane
-    const idxM = salesLocal.findIndex(x=>x.clientId===cid && x.month===m && x.source==='weekly');
-    const rec = {id: idxM>=0? salesLocal[idxM].id : nextId('S'), clientId:cid, month:m, amount:sumW, source:'weekly'};
-    if(idxM>=0) salesLocal[idxM]=rec; else salesLocal.push(rec);
-  });
+  function drawLine(canvasId, labels, series){
+    const c=document.getElementById(canvasId); if(!c) return;
+    const ctx=c.getContext('2d'); const w=c.width= c.clientWidth; const h=c.height= 200;
+    ctx.clearRect(0,0,w,h);
+    const max=Math.max(1, ...series); const pad=20; const stepX=(w-2*pad)/Math.max(1,labels.length-1);
+    ctx.strokeStyle='#94a3b8'; ctx.beginPath(); ctx.moveTo(pad,h-pad); ctx.lineTo(w-pad,h-pad); ctx.stroke();
+    ctx.strokeStyle='#2563eb'; ctx.beginPath();
+    series.forEach((v,i)=>{ const x=pad+i*stepX; const y=h-pad - (v/max)*(h-2*pad); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+    ctx.stroke(); ctx.fillStyle='#0f172a'; ctx.font='10px system-ui';
+    labels.forEach((l,i)=>{ const x=pad+i*stepX; ctx.fillText(l.slice(5), x-8, h-6); });
+  }
 
-  setSalesW(salesWLocal);
-  setSales(salesLocal);
-  changed = touchedPairs.size; // numero di mesi (cliente×mese) aggiornati
-}
-          alert('Import: '+changed+' righe aggiunte');
-          paint();
-        });
-      }
-      paint();
+  function paint(){
+    const month=document.getElementById('m')?document.getElementById('m').value:monthSel;
+    const sums=sumByClientMonth(month);
+
+    root.innerHTML=
+      '<div class="space-y-4">'+
+        // --- CARD: Import CSV (AGGIORNATA) ---
+        '<div class="card"><div class="card-h"><h3 class="font-semibold">Import CSV</h3></div>'+
+          '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">'+
+            '<select id="impType" class="border rounded-xl px-3 py-2">'+
+              '<option value="monthly">Mensile (cliente,mese,importo)</option>'+
+              '<option value="weekly">Settimanale (cliente,week40,week41,...)</option>'+
+              '<option value="ytd">Annuale YTD (colonne mesi: Gen, Feb, ... o 2025-01, ...)</option>'+
+              '<option value="mov">Movimenti (righe con Data + Importo)</option>'+
+            '</select>'+
+            '<input id="impYear" class="border rounded-xl px-3 py-2" type="number" placeholder="Anno (per settimanale/YTD)">'+
+            '<input id="impWeeks" class="border rounded-xl px-3 py-2 md:col-span-2" placeholder="Settimane (es. 40,41,42,43)">'+
+            '<input id="impFile" type="file" accept=".csv,text/csv" class="md:col-span-2">'+
+            '<div class="md:col-span-6 text-right"><button id="doImport" class="btn-primary">Importa</button></div>'+
+            '<div class="md:col-span-6 text-xs text-slate-500">Supporta: Mensile, Settimanale (ricostruisce il mensile), Annuale YTD (colonne mesi) e Movimenti (Data+Importo). Evita duplicati su cliente×mese.</div>'+
+          '</div>'+
+        '</div>'+
+
+        // --- CARD: Riepilogo mese ---
+        '<div class="card"><div class="card-h"><h3 class="font-semibold">Riepilogo mese</h3><div class="flex items-center gap-2"><input id="m" type="month" value="'+month+'" class="border rounded-xl px-3 py-2"></div></div>'+
+        '<div class="card-b overflow-auto">'+
+          '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>'+
+          '<th class="text-left px-2 py-2">Cliente</th><th class="text-right px-2 py-2">Obiettivo</th><th class="text-right px-2 py-2">Fatturato</th><th class="text-left px-2 py-2">Avanzamento</th><th class="text-right px-2 py-2">Δ MoM</th><th class="text-right px-2 py-2">Δ YoY</th>'+
+          '</tr></thead><tbody id="rows">'+
+            getClients().map(c=>{
+              const val=sums[c.id]||0; const goal=Number(c.goalMonthly||0); const pct=goal?Math.min(100,Math.round(100*val/goal)):null;
+              const g=(function(clientId, m){
+                const [y,mm]=m.split('-').map(Number);
+                const prev=(mm===1?(y-1):y)+'-'+String(mm===1?12:mm-1).padStart(2,'0');
+                const prevYoY=(y-1)+'-'+String(mm).padStart(2,'0');
+                const cur=getSales().filter(s=>s.clientId===clientId && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0);
+                const prv=getSales().filter(s=>s.clientId===clientId && s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
+                const yoy=getSales().filter(s=>s.clientId===clientId && s.month===prevYoY).reduce((a,b)=>a+Number(b.amount||0),0);
+                return {cur,prv,delta:cur-prv,yoy,deltaY:cur-yoy, prevMonth:prev, prevYear:prevYoY};
+              })(c.id, month);
+              const delta=g.delta; const deltaY=g.deltaY; const sign=delta>0?'+':''; const signY=deltaY>0?'+':'';
+              const bar='<div class="w-40 h-2 bg-slate-200 rounded-full overflow-hidden"><div style="width:'+(pct||0)+'%;height:100%" class="bg-blue-500"></div></div> ' + (pct!=null?(pct+'%'):'—');
+              return '<tr class="border-b">'+
+                  '<td class="px-2 py-2">'+c.name+'</td>'+
+                  '<td class="px-2 py-2 text-right">'+(goal?fmtEuro(goal):'-')+'</td>'+
+                  '<td class="px-2 py-2 text-right">'+fmtEuro(val)+'</td>'+
+                  '<td class="px-2 py-2">'+bar+'</td>'+
+                  '<td class="px-2 py-2 text-right '+(delta<0?'text-red-600':(delta>0?'text-emerald-600':''))+'">'+sign+fmtEuro(delta)+' ('+g.prevMonth+')</td>'+
+                  '<td class="px-2 py-2 text-right '+(deltaY<0?'text-red-600':(deltaY>0?'text-emerald-600':''))+'">'+signY+fmtEuro(deltaY)+' ('+g.prevYear+')</td>'+
+                '</tr>';
+            }).join('')+
+          '</tbody></table>'+
+          '<div class="mt-3 text-right"><button id="exportCSV" class="btn">⬇️ Export CSV cliente×mese</button></div>'+
+        '</div></div>'+
+
+        // --- CARD: Grafico totale ---
+        '<div class="card"><div class="card-h"><h3 class="font-semibold">Grafico mensile (totale)</h3></div>'+
+          '<div class="card-b"><canvas id="chartTot" style="width:100%"></canvas></div>'+
+        '</div>'+
+
+        // --- CARD: Andamento cliente ---
+        '<div class="card"><div class="card-h"><h3 class="font-semibold">Andamento cliente (YTD)</h3></div>'+
+          '<div class="card-b">'+
+            '<div class="flex items-center gap-2 mb-3">'+
+              '<select id="selClient" class="border rounded-xl px-3 py-2">'+ getClients().map(c=>'<option value="'+c.id+'">'+c.name+'</option>').join('') +'</select>'+
+              '<input id="yearYTD" type="number" value="'+ new Date().getFullYear() +'" class="border rounded-xl px-3 py-2" style="width:120px">'+
+            '</div>'+
+            '<canvas id="chartClient" style="width:100%"></canvas>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+
+    // Grafico totale ultimi 12 mesi
+    const months=[]; const now=new Date();
+    for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); const ym=d.toISOString().slice(0,7); months.push(ym); }
+    const totals=months.map(m=> getSales().filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
+    drawLine('chartTot', months, totals);
+
+    // Grafico cliente
+    function paintClientChart(){
+      const id=document.getElementById('selClient').value;
+      const Y=Number(document.getElementById('yearYTD').value||now.getFullYear());
+      const labs=[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>Y+'-'+String(m).padStart(2,'0'));
+      const ser=labs.map(m=> getSales().filter(s=>s.clientId===id && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0) );
+      drawLine('chartClient', labs, ser);
     }
+    document.getElementById('selClient').addEventListener('change',paintClientChart);
+    document.getElementById('yearYTD').addEventListener('input',paintClientChart);
+    paintClientChart();
+
+    document.getElementById('m').addEventListener('change', paint);
+
+    document.getElementById('exportCSV').addEventListener('click', ()=>{
+      const rows=[['client_code','client_name','month','amount']];
+      const mapName=Object.fromEntries(getClients().map(c=>[c.id,c.name]));
+      const mapCode=Object.fromEntries(getClients().map(c=>[c.id,c.code||'']));
+      getSales().forEach(s=>{ rows.push([mapCode[s.clientId]||'', mapName[s.clientId]||'', s.month, String(s.amount||0)]); });
+      const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace('"','""')+'"'):v).join(',')).join('\r\n');
+      const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clienti_mese.csv'; a.click();
+    });
+
+    // ===== LISTENER IMPORT con tutti i tipi: monthly / weekly / ytd / mov =====
+    document.getElementById('doImport').addEventListener('click', async ()=>{
+      const file=document.getElementById('impFile').files?.[0];
+      if(!file){ alert('Seleziona un CSV'); return; }
+      const type=document.getElementById('impType').value;
+
+      const text=await file.text();
+      const tab=parseCSV(text);
+      const hRaw=tab.header;
+      const h=hRaw.map(x=>String(x||''));
+      const norm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+      const H = h.map(norm);
+
+      const idx = (...aliases)=> {
+        for(const a of aliases){
+          const i = H.indexOf(norm(a));
+          if(i>=0) return i;
+        }
+        return -1;
+      };
+
+      const pad2 = n => String(n).padStart(2,'0');
+
+      function matchClient(name, code){
+        if(code){
+          const m=getClients().find(c=> (c.code||'').toLowerCase()===String(code).toLowerCase());
+          if(m) return m.id;
+        }
+        if(name){
+          const m=getClients().find(c=> (c.name||'').toLowerCase()===String(name).toLowerCase());
+          if(m) return m.id;
+        }
+        return null;
+      }
+
+      function upsertMonthly(salesLocal, clientId, month, amount, source){
+        const i = salesLocal.findIndex(x=>x.clientId===clientId && x.month===month);
+        const rec = {id: i>=0? salesLocal[i].id : nextId('S'), clientId, month, amount:Number(amount)||0, source};
+        if(i>=0) salesLocal[i]=rec; else salesLocal.push(rec);
+      }
+
+      let changed=0;
+
+      if(type==='monthly'){
+        const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale');
+        const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
+        const im= idx('mese')>-1?idx('mese'): idx('month');
+        const ia= idx('importo')>-1?idx('importo'): idx('amount');
+        if(ic<0 || im<0 || ia<0){ alert('CSV mensile: servono colonne cliente, mese (YYYY-MM) e importo'); return; }
+
+        let salesLocal=[...getSales()];
+        tab.rows.forEach(r=>{
+          const name=r[ic]?.trim(); const code=r[icode]?.trim();
+          const id=matchClient(name, code); if(!id) return;
+          const m=(r[im]||'').trim(); const amt=normalizeAmount(r[ia]);
+          if(!m || isNaN(amt)) return;
+          upsertMonthly(salesLocal, id, m, amt, 'monthly');
+          changed++;
+        });
+        setSales(salesLocal);
+        alert('Import (mensile): '+changed+' righe aggiornate');
+      }
+      else if(type==='weekly'){
+        const year=Number(document.getElementById('impYear').value||new Date().getFullYear());
+        const weeks=(document.getElementById('impWeeks').value||'').split(',').map(x=>Number(x.trim())).filter(Boolean);
+        if(!weeks.length){ alert('Specifica le settimane (es. 40,41,42,43)'); return; }
+
+        const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale')>-1?idx('ragione sociale'):0;
+        const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
+
+        let salesWLocal=[...getSalesW()];
+        let salesLocal=[...getSales()];
+        const touched = new Set();
+
+        tab.rows.forEach(r=>{
+          const name=r[ic]?.trim(); const code=r[icode]?.trim();
+          const id=matchClient(name, code); if(!id) return;
+
+          weeks.forEach(w=>{
+            const colIndex = H.findIndex(col => col.replace(/\s+/g,'').includes(String(w)));
+            if(colIndex<0) return;
+            const amt=normalizeAmount(r[colIndex]||0);
+            const date=isoWeekStart(year, w).toISOString().slice(0,10);
+            const monthKey=date.slice(0,7);
+
+            const idxW = salesWLocal.findIndex(x=>x.clientId===id && x.year===year && x.week===w);
+            if(idxW>=0) salesWLocal[idxW] = {...salesWLocal[idxW], amount:amt, dateISO:date};
+            else salesWLocal.push({id:nextId('W'), clientId:id, year, week:w, dateISO:date, amount:amt});
+
+            touched.add(id+'|'+monthKey);
+          });
+        });
+
+        touched.forEach(pair=>{
+          const [cid, m] = pair.split('|');
+          const sumW = salesWLocal.filter(x=>x.clientId===cid && x.dateISO.slice(0,7)===m)
+                        .reduce((a,b)=>a+Number(b.amount||0),0);
+          upsertMonthly(salesLocal, cid, m, sumW, 'weekly');
+        });
+
+        setSalesW(salesWLocal);
+        setSales(salesLocal);
+        changed = touched.size;
+        alert('Import (settimanale): aggiornati '+changed+' mesi');
+      }
+      else if(type==='ytd'){
+        const M = {
+          'gennaio':1,'gen':1,'jan':1,
+          'febbraio':2,'feb':2,
+          'marzo':3,'mar':3,
+          'aprile':4,'apr':4,
+          'maggio':5,'mag':5,'may':5,
+          'giugno':6,'giu':6,'jun':6,
+          'luglio':7,'lug':7,'jul':7,
+          'agosto':8,'ago':8,'aug':8,
+          'settembre':9,'set':9,'sep':9,
+          'ottobre':10,'ott':10,'oct':10,
+          'novembre':11,'nov':11,
+          'dicembre':12,'dic':12,'dec':12
+        };
+
+        const ic = idx('cliente','ragione sociale','nome');
+        const icode = idx('codice','codice cliente');
+        const fallbackYear = Number(document.getElementById('impYear').value || new Date().getFullYear());
+
+        const monthCols = [];
+        H.forEach((col,i)=>{
+          let m = col.match(/(20\d{2})\D?(\d{1,2})$/);
+          if(m){ monthCols.push({idx:i, ym: m[1]+'-'+pad2(Number(m[2]))}); return; }
+          for(const k in M){
+            if(col.includes(k)){
+              const y = (col.match(/(20\d{2})/)||[])[1] || fallbackYear;
+              monthCols.push({idx:i, ym: String(y)+'-'+pad2(M[k])});
+              return;
+            }
+          }
+        });
+
+        if(monthCols.length===0){ alert('Non trovo colonne mese nel CSV (es. Gen, Feb, 2025-01, ...)'); return; }
+
+        let salesLocal=[...getSales()];
+        const touched = new Set();
+
+        tab.rows.forEach(r=>{
+          const name=r[ic]?.trim(); const code=r[icode]?.trim();
+          const id=matchClient(name, code); if(!id) return;
+          monthCols.forEach(mc=>{
+            const amt=normalizeAmount(r[mc.idx]||0);
+            if(!amt) return;
+            upsertMonthly(salesLocal, id, mc.ym, amt, 'ytd');
+            touched.add(id+'|'+mc.ym);
+          });
+        });
+
+        setSales(salesLocal);
+        changed = touched.size;
+        alert('Import (YTD): aggiornati '+changed+' client×mese');
+      }
+      else if(type==='mov'){
+        const icode = idx('codice','codice cliente');
+        const ic = idx('cliente','ragione sociale','nome');
+        const idate = idx('data','data documento','data doc','date');
+        const iamt = idx('importo','totale','netto','amount','value');
+        if((icode<0 && ic<0) || idate<0 || iamt<0){
+          alert('CSV movimenti: servono Data, Importo e Cliente (o Codice)'); return;
+        }
+
+        function parseDateToYM(s){
+          s=String(s||'').trim();
+          let m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+          if(m){
+            const mm=Number(m[2]), y=Number(m[3].length===2? ('20'+m[3]) : m[3]);
+            return y+'-'+pad2(mm);
+          }
+          m = s.match(/^(20\d{2})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+          if(m) return m[1]+'-'+pad2(Number(m[2]));
+          const dt=new Date(s); if(!isNaN(dt)) return dt.getFullYear()+'-'+pad2(dt.getMonth()+1);
+          return null;
+        }
+
+        const acc = new Map(); // key = cid|YYYY-MM -> somma
+        tab.rows.forEach(r=>{
+          const name=r[ic]?.trim(); const code=r[icode]?.trim();
+          const id=matchClient(name, code); if(!id) return;
+          const ym = parseDateToYM(r[idate]);
+          const amt = normalizeAmount(r[iamt]);
+          if(!ym || !amt) return;
+          const key=id+'|'+ym;
+          acc.set(key, (acc.get(key)||0)+amt);
+        });
+
+        let salesLocal=[...getSales()];
+        let count=0;
+        acc.forEach((sum, key)=>{
+          const [cid, ym] = key.split('|');
+          upsertMonthly(salesLocal, cid, ym, sum, 'mov');
+          count++;
+        });
+        setSales(salesLocal);
+        alert('Import (movimenti): aggiornati '+count+' client×mese');
+      }
+
+      // ridisegna
+      paint();
+    });
+  }
+
+  paint();
+}
 
     // ——— Agenda ———
     function renderAgenda(root){
@@ -1090,6 +1369,19 @@ async function ensureFirebaseConnected(){
               '<label class=\"text-sm\">Agent ID (univoco)<input class=\"border rounded-xl px-3 py-2\" id=\"fbAgent\" value=\"',(fb.agentId||''),'\" placeholder=\"es. riccardo-masetto-2025-privato\"></label>',
               '<textarea id=\"fbConfig\" class=\"border rounded-xl px-3 py-2 w-full\" placeholder=\"Incolla qui il JSON di config Firebase\">',(fb.config?JSON.stringify(fb.config):''),'</textarea>',
               '<div class=\"flex gap-2 items-center flex-wrap\"><label class=\"flex items-center gap-2\"><input type=\"checkbox\" id=\"fbEnable\" ',(fb.enabled?'checked':''),' > Abilita</label><button id=\"fbConnect\" class=\"btn\">Connetti</button><button id=\"fbTest\" class=\"btn\">Test connessione</button><button id=\"fbUp\" class=\"btn\">Upload dati</button><button id=\"fbDown\" class=\"btn\">Scarica dati</button></div>',
+              '<div class="space-y-2">',
+                '<div class="text-sm font-medium">Autenticazione</div>',
+                '<label class="flex items-center gap-2">',
+                '<input type="radio" name="fbAuthMode" value="anon" ',((fb.authMode||'anon')==='anon'?'checked':''),' > Accesso anonimo (consigliato)',
+                '</label>',
+                '<label class="flex items-center gap-2">',
+                  '<input type="radio" name="fbAuthMode" value="password" ',((fb.authMode||'anon')==='password'?'checked':''),' > Email + Password',
+                '</label>',
+                '<div class="grid grid-cols-1 md:grid-cols-2 gap-2">',
+                  '<input id="fbEmail" class="border rounded-xl px-3 py-2" value="',(fb.email||''),'" placeholder="Email (se usi password)">',
+                  '<input id="fbPass" type="password" class="border rounded-xl px-3 py-2" placeholder="Password (non viene salvata)">',
+                '</div>',
+              '</div>',              
               '<div id=\"fbStatus\" class=\"text-xs text-slate-500\">Stato: non connesso</div>',
             '</div>',
           '</div>',
@@ -1112,25 +1404,39 @@ async function ensureFirebaseConnected(){
       document.getElementById('wipe').addEventListener('click',()=>{ if(confirm('Sicuro?')){ ['settings','clients','visits','promos','sales','salesW','tours','firebase','counters'].forEach(k=>localStorage.removeItem(k)); location.reload(); } });
 
       function saveFB(){
-  const enabled = document.getElementById('fbEnable').checked;
-  const agentId = val('#fbAgent');
-  let conf = null;
-  try { conf = JSON.parse(val('#fbConfig') || 'null'); }
-  catch { alert('Config non è un JSON valido'); return; }
-  setFB({enabled, agentId, config: conf});
-  document.getElementById('fbStatus').textContent = 'Stato: impostazioni salvate';
+  const enabled=document.getElementById('fbEnable').checked;
+  const agentId=val('#fbAgent');
+  let conf=null;
+  try{ conf=JSON.parse(val('#fbConfig')||'null'); }catch{ alert('Config non è un JSON valido'); return; }
+  const authMode = (root.querySelector('input[name="fbAuthMode"]:checked')?.value)||'anon';
+  const email = (document.getElementById('fbEmail')?.value)||'';
+  setFB({enabled, agentId, config:conf, authMode, email});
+  document.getElementById('fbStatus').textContent='Stato: impostazioni salvate';
 }
 
 async function fbConnect(){
   try{
-    saveFB(); // <-- salva i valori correnti prima di connettere
-    const ok = await ensureFirebaseConnected();
-    if(!ok){ alert('Compila agent id, config e abilita'); return; }
-    const uid = window._fbAuth.currentUser?.uid || '(anonimo)';
-    document.getElementById('fbStatus').textContent = 'Stato: connesso (UID '+uid+')';
-    alert('Connesso (Anonymous)');
+    saveFB(); // salva prima i campi UI
+    const fb = getFB();
+    if(!fb.enabled || !fb.config || !fb.agentId){ alert('Compila agent id, config e abilita'); return; }
+    await loadFirebaseCDN();
+    if(!window._fbApp){
+      window._fbApp=firebase.initializeApp(fb.config);
+      window._fbAuth=firebase.auth();
+      window._fbDB=firebase.firestore();
+    }
+    if(fb.authMode==='password'){
+      const pass = document.getElementById('fbPass')?.value || '';
+      if(!fb.email || !pass){ alert('Inserisci email e password'); return; }
+      window._fbPassword = pass; // volatile in RAM
+      await window._fbAuth.signInWithEmailAndPassword(fb.email, pass);
+    }else{
+      await window._fbAuth.signInAnonymously();
+    }
+    const uid = window._fbAuth.currentUser?.uid || '(?)';
+    document.getElementById('fbStatus').textContent='Stato: connesso (UID '+uid+')';
+    alert('Connesso');
   }catch(e){
-    console.error(e);
     alert('Errore connessione: '+(e?.message||e));
   }
 }
