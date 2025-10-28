@@ -224,7 +224,7 @@ async function ensureFirebaseConnected(){
   const visitsMonth=visits.filter(v=>(v.date||'').startsWith(month)).length;
   const totalMonth=sales.filter(x=>x.month===month).reduce((a,b)=>a+Number(b.amount||0),0);
 
-  // Alert scadenze per cliente (da cPromos)
+  // Alert scadenze SOLO promozioni
   const cPromos=getCPromos();
   const alerts=[];
   cPromos.forEach(cp=>{
@@ -237,34 +237,26 @@ async function ensureFirebaseConnected(){
     }
   });
 
-  // Alert clienti senza fatturato >21gg (come richiesto)
-  const lastSale=lastSaleDateByClient();
-  clients.forEach(c=>{
-    const l=lastSale[c.id];
-    if(!l || daysBetween(l, today())>21){
-      alerts.push({t:'fatturato', txt:c.name+': nessun fatturato negli ultimi 21 giorni'});
-    }
-  });
-
   const alertsHTML = alerts.length
     ? '<ul class="space-y-2 text-sm">'+alerts.map(a =>
-        '<li class="flex gap-2"><span class="pill '+(a.t==='promo'?'bg-amber-100 text-amber-700 border-amber-200':'bg-red-100 text-red-700 border-red-200')+'">'+a.t+'</span><span>'+a.txt+'</span></li>'
+        '<li class="flex gap-2"><span class="pill bg-amber-100 text-amber-700 border-amber-200">'+a.t+'</span><span>'+a.txt+'</span></li>'
       ).join('')+'</ul>'
     : '<div class="text-slate-500 text-sm">Nessun avviso</div>';
 
-  // Top 10 da visitare (più "urgenti" in base a ultima visita e frequenza tier)
+  const lastSyncBadge = getSync().lastSyncISO
+    ? '<span class="pill bg-emerald-50 text-emerald-700 border-emerald-200">Cloud: '+new Date(getSync().lastSyncISO).toLocaleString('it-IT')+'</span>'
+    : '<span class="pill bg-slate-50 text-slate-600 border-slate-200">Cloud: mai</span>';
+
+  // Top 10 da visitare (logica invariata)
   const s=getSettings();
+  const tierToFreqLocal=(t)=>t==='importante'?s.freqImportant:(t==='nuovo'?s.freqNew:s.freqStandard);
   const dueScore = (c)=>{
-    const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate, tierToFreq(c.tier||'standard',s)):'');
+    const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate, tierToFreqLocal(c.tier||'standard')):'');
     const daysLate = nextDefault ? Math.max(0, daysBetween(nextDefault, today())) : 9999;
     const weight = c.tier==='importante'?2:(c.tier==='nuovo'?1.5:1);
     return daysLate*weight;
   };
   const top10 = [...clients].sort((a,b)=>dueScore(b)-dueScore(a)).slice(0,10);
-
-  const lastSyncBadge = getSync().lastSyncISO
-    ? '<span class="pill bg-emerald-50 text-emerald-700 border-emerald-200">Cloud: '+new Date(getSync().lastSyncISO).toLocaleString('it-IT')+'</span>'
-    : '<span class="pill bg-slate-50 text-slate-600 border-slate-200">Cloud: mai</span>';
 
   root.innerHTML=[
     '<div class="grid grid-cols-1 lg:grid-cols-4 gap-4">',
@@ -279,25 +271,25 @@ async function ensureFirebaseConnected(){
         top10.length?('<ul class="text-sm space-y-2">'+top10.map(c=>'<li><span class="font-medium">'+c.name+'</span> — tier: '+(c.tier||'standard')+' · prossima: '+(c.nextVisitDate?fmtDate(c.nextVisitDate):'–')+' <button class="btn" data-qv="'+c.id+'">+ visita rapida</button></li>').join('')+'</ul>'):'<div class="text-slate-500 text-sm">—</div>',
       '</div></div>',
     '</div>'
-  ].join('');
+  ].join('')
 
-  // quick visit buttons
+  // quick visit
   root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{ registerQuickVisit(b.getAttribute('data-qv')); renderDashboard(root); }));
 
-  // quick sync = richiama upload (se app connessa) al volo
+  // quick sync
   const qs=root.querySelector('#quickSync');
-    if(qs) qs.addEventListener('click', async ()=>{
-      const ok = await ensureFirebaseConnected();
-      if(!ok){ alert('Connettiti prima in Impostazioni → Sincronizzazione'); return; }
+  if(qs) qs.addEventListener('click', async ()=>{
+    const ok = await ensureFirebaseConnected();
+    if(!ok){ alert('Connettiti prima in Impostazioni → Sincronizzazione'); return; }
     const fb=getFB();
     const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
     const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),
-                 sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
-      await docRef.set(payload);
-      setSync({lastSyncISO:new Date().toISOString()});
-      alert('Sync ok');
-      renderDashboard(root);
-    });
+                   sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
+    await docRef.set(payload);
+    setSync({lastSyncISO:new Date().toISOString()});
+    alert('Sync ok');
+    renderDashboard(root);
+  });
 }
 
     // ——— Clienti ———
@@ -832,11 +824,47 @@ async function ensureFirebaseConnected(){
     }
     function normalizeAmount(s){ if(s==null) return 0; s=String(s).replace(/\\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
     function renderFatturati(root){
-  let sales=getSales(); let weekSales=getSalesW(); const clients=getClients();
-  const monthSel=yyyymm();
+  let sales=getSales();
+  let weekSales=getSalesW();
+  const clients=getClients();
+  const monthDefault=yyyymm();
 
-  function sumByClientMonth(m){ const map={}; getSales().filter(x=>x.month===m).forEach(x=>{ map[x.clientId]=(map[x.clientId]||0)+Number(x.amount||0); }); return map; }
+  // ——— Stato ordinamento (persistito) ———
+  const sortStateKey='fattSort';
+  const defaultSort={key:'amount', dir:'desc'}; // di default ordina per fatturato discendente
+  let sortState=lsGet(sortStateKey, defaultSort);
+  function saveSort(s){ sortState=s; lsSet(sortStateKey, s); }
 
+  // ——— Helpers ———
+  function cmp(a,b,dir){ return dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0)); }
+  function rowMonthlyData(c, m){
+    const goal=Number(c.goalMonthly||0);
+    const cur=sales.filter(s=>s.clientId===c.id && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0);
+    const [y,mm]=m.split('-').map(Number);
+    const prev=(mm===1?(y-1):y)+'-'+String(mm===1?12:mm-1).padStart(2,'0');
+    const yoy=(y-1)+'-'+String(mm).padStart(2,'0');
+    const prv=sales.filter(s=>s.clientId===c.id && s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
+    const yv =sales.filter(s=>s.clientId===c.id && s.month===yoy ).reduce((a,b)=>a+Number(b.amount||0),0);
+    return {
+      id:c.id, code:c.code||'', name:c.name, goal,
+      amount:cur, delta:(cur-prv), deltaY:(cur-yv),
+      prev, prevYoY:yoy
+    };
+  }
+  function weekAmount(clientId, year, week){
+    const rec = weekSales.find(w=>w.clientId===clientId && w.year===year && w.week===week);
+    return Number(rec?.amount||0);
+  }
+  function weeksAvailable(){
+    // restituisce lista ordinata di {year, week} presenti in salesW
+    const set=new Set(weekSales.map(w=>w.year+'|'+w.week));
+    return [...set].map(s=>({year:Number(s.split('|')[0]), week:Number(s.split('|')[1])}))
+                   .sort((a,b)=> a.year!==b.year ? a.year-b.year : a.week-b.week);
+  }
+  function lastAvailableWeek(){
+    const all=weeksAvailable();
+    return all.length? all[all.length-1] : {year:new Date().getFullYear(), week:1};
+  }
   function drawLine(canvasId, labels, series){
     const c=document.getElementById(canvasId); if(!c) return; const ctx=c.getContext('2d'); const w=c.width= c.clientWidth; const h=c.height= 200;
     ctx.clearRect(0,0,w,h);
@@ -849,74 +877,179 @@ async function ensureFirebaseConnected(){
   }
 
   function paint(){
-    const month=document.getElementById('m')?document.getElementById('m').value:monthSel;
-    const sums=sumByClientMonth(month);
+    const month=document.getElementById('m')?document.getElementById('m').value:monthDefault;
 
+    // ====== UI ======
     root.innerHTML=[
-      // —— pannello import (quello passato sopra) ——
       '<div class="space-y-4">',
+
+        // Import CSV
         '<div class="card"><div class="card-h"><h3 class="font-semibold">Import CSV</h3></div>',
           '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
             '<select id="impType" class="border rounded-xl px-3 py-2">',
               '<option value="monthly">Mensile (cliente,mese,importo)</option>',
               '<option value="weekly">Settimanale (cliente,week40,week41,...)</option>',
-              '<option value="yearToDate">Annuale (YTD – settimane 1..53)</option>',
+              '<option value="annual">Annuale YTD (cliente,gen,feb,...,dic)</option>',
             '</select>',
             '<input id="impYear" class="border rounded-xl px-3 py-2" type="number" placeholder="Anno (per settimanale)">',
             '<input id="impWeeks" class="border rounded-xl px-3 py-2 md:col-span-2" placeholder="Settimane (es. 40,41,42,43)">',
-            '<input id="impYearYTD" class="border rounded-xl px-3 py-2" type="number" value="', new Date().getFullYear() ,'" placeholder="Anno YTD">',
             '<input id="impFile" type="file" accept=".csv,text/csv" class="md:col-span-2">',
             '<div class="md:col-span-6 text-right"><button id="doImport" class="btn-primary">Importa</button></div>',
-            '<div class="md:col-span-6 text-xs text-slate-500">Nota: evita duplicati su cliente+mese o cliente+settimana. Per il file annuale (YTD) con settimane 1..53, seleziona "Annuale (YTD)".</div>',
+            '<div class="md:col-span-6 text-xs text-slate-500">Nota: il parser evita duplicati. Annuale YTD distribuisce i totali sui mesi (YYYY-01…12).</div>',
           '</div>',
         '</div>',
 
-        // —— riepilogo mese ——
-        '<div class="card"><div class="card-h"><h3 class="font-semibold">Riepilogo mese</h3><div class="flex items-center gap-2"><input id="m" type="month" value="',month,'" class="border rounded-xl px-3 py-2"></div></div>',
+        // Mensile (con sorting)
+        '<div class="card"><div class="card-h">',
+          '<h3 class="font-semibold">Riepilogo mese</h3>',
+          '<div class="flex items-center gap-2"><input id="m" type="month" value="',month,'" class="border rounded-xl px-3 py-2"></div>',
+        '</div>',
         '<div class="card-b overflow-auto">',
           '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-          '<th class="text-left px-2 py-2">Cliente</th><th class="text-right px-2 py-2">Obiettivo</th><th class="text-right px-2 py-2">Fatturato</th><th class="text-left px-2 py-2">Avanzamento</th><th class="text-right px-2 py-2">Δ MoM</th><th class="text-right px-2 py-2">Δ YoY</th>',
-          '</tr></thead><tbody id="rows">', getClients().map(c=>{
-            const val=sums[c.id]||0; const goal=Number(c.goalMonthly||0); const pct=goal?Math.min(100,Math.round(100*val/goal)):null;
-            const [y,mm]=month.split('-').map(Number);
-            const prev=(mm===1?(y-1):y)+'-'+String(mm===1?12:mm-1).padStart(2,'0');
-            const prevYoY=(y-1)+'-'+String(mm).padStart(2,'0');
-            const cur=getSales().filter(s=>s.clientId===c.id && s.month===month).reduce((a,b)=>a+Number(b.amount||0),0);
-            const prv=getSales().filter(s=>s.clientId===c.id && s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
-            const yoy=getSales().filter(s=>s.clientId===c.id && s.month===prevYoY).reduce((a,b)=>a+Number(b.amount||0),0);
-            const delta=cur-prv, deltaY=cur-yoy;
-            const sign=delta>0?'+':'', signY=deltaY>0?'+':'';
-            const bar='<div class="w-40 h-2 bg-slate-200 rounded-full overflow-hidden"><div style="width:'+(pct||0)+'%;height:100%" class="bg-blue-500"></div></div> '+(pct!=null?(pct+'%'):'—');
-            return ['<tr class="border-b">',
-              '<td class="px-2 py-2">',c.name,'</td>',
-              '<td class="px-2 py-2 text-right">',goal?fmtEuro(goal):'-','</td>',
-              '<td class="px-2 py-2 text-right">',fmtEuro(val),'</td>',
-              '<td class="px-2 py-2">',bar,'</td>',
-              '<td class="px-2 py-2 text-right ',(delta<0?'text-red-600':(delta>0?'text-emerald-600':'')),'">',sign,fmtEuro(delta),' (',prev,')</td>',
-              '<td class="px-2 py-2 text-right ',(deltaY<0?'text-red-600':(deltaY>0?'text-emerald-600':'')),'">',signY,fmtEuro(deltaY),' (',prevYoY,')</td>',
-            '</tr>'].join('');
-          }).join(''),'</tbody></table>',
+            '<th class="text-left px-2 py-2 cursor-pointer" data-sort="name">Cliente</th>',
+            '<th class="text-right px-2 py-2 cursor-pointer" data-sort="goal">Obiettivo</th>',
+            '<th class="text-right px-2 py-2 cursor-pointer" data-sort="amount">Fatturato</th>',
+            '<th class="text-left  px-2 py-2">Avanzamento</th>',
+            '<th class="text-right px-2 py-2 cursor-pointer" data-sort="delta">Δ MoM</th>',
+            '<th class="text-right px-2 py-2 cursor-pointer" data-sort="deltaY">Δ YoY</th>',
+          '</tr></thead><tbody id="rowsM"></tbody></table>',
           '<div class="mt-3 text-right"><button id="exportCSV" class="btn">⬇️ Export CSV cliente×mese</button></div>',
         '</div></div>',
 
-        // —— grafici ——
+        // Settimanale (nuova tabella)
+        '<div class="card"><div class="card-h">',
+          '<h3 class="font-semibold">Riepilogo settimanale</h3>',
+          '<div class="flex items-center gap-2">',
+            '<input id="yearW" class="border rounded-xl px-3 py-2" type="number" value="',(lastAvailableWeek().year||new Date().getFullYear()),'">',
+            '<input id="weekW" class="border rounded-xl px-3 py-2" type="number" value="',(lastAvailableWeek().week||1),'" min="1" max="53">',
+          '</div>',
+        '</div>',
+        '<div class="card-b overflow-auto">',
+          '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+            '<th class="text-left px-2 py-2 cursor-pointer" data-sortw="name">Cliente</th>',
+            '<th class="text-right px-2 py-2 cursor-pointer" data-sortw="amount">Importo sett.</th>',
+            '<th class="text-right px-2 py-2 cursor-pointer" data-sortw="deltaW">Δ vs sett. prec.</th>',
+          '</tr></thead><tbody id="rowsW"></tbody></table>',
+        '</div></div>',
+
+        // Grafici
         '<div class="card"><div class="card-h"><h3 class="font-semibold">Grafico mensile (totale)</h3></div>',
           '<div class="card-b"><canvas id="chartTot" style="width:100%"></canvas></div>',
         '</div>',
         '<div class="card"><div class="card-h"><h3 class="font-semibold">Andamento cliente (YTD)</h3></div>',
           '<div class="card-b">',
             '<div class="flex items-center gap-2 mb-3">',
-              '<select id="selClient" class="border rounded-xl px-3 py-2">', getClients().map(c=>'<option value="'+c.id+'">'+c.name+'</option>').join('') ,'</select>',
+              '<select id="selClient" class="border rounded-xl px-3 py-2">', clients.map(c=>'<option value="'+c.id+'">'+c.name+'</option>').join('') ,'</select>',
               '<input id="yearYTD" type="number" value="', new Date().getFullYear() ,'" class="border rounded-xl px-3 py-2" style="width:120px">',
             '</div>',
             '<canvas id="chartClient" style="width:100%"></canvas>',
           '</div>',
         '</div>',
+
       '</div>'
     ].join('');
 
-    // grafici
-    const months=[]; const now=new Date(); for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); const ym=d.toISOString().slice(0,7); months.push(ym); }
+    // ====== Render tabelle ======
+    function paintMonthlyTable(){
+      const m=document.getElementById('m').value;
+      const data=clients.map(c=>rowMonthlyData(c,m));
+
+      // sort
+      data.sort((A,B)=>{
+        const k=sortState.key, d=sortState.dir;
+        if(k==='name')   return cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
+        if(k==='goal')   return cmp(A.goal,   B.goal,   d);
+        if(k==='amount') return cmp(A.amount, B.amount, d);
+        if(k==='delta')  return cmp(A.delta,  B.delta,  d);
+        if(k==='deltaY') return cmp(A.deltaY, B.deltaY, d);
+        return 0;
+      });
+
+      const rows=data.map(r=>{
+        const goal=r.goal; const val=r.amount;
+        const pct=goal?Math.min(100,Math.round(100*val/goal)):null;
+        const bar='<div class="w-40 h-2 bg-slate-200 rounded-full overflow-hidden"><div style="width:'+ (pct||0) +'%;height:100%" class="bg-blue-500"></div></div> ' + (pct!=null?(pct+'%'):'—');
+        const sgn  = r.delta>0?'+':''; const sgnY = r.deltaY>0?'+':'';
+        const cls  = r.delta<0?'text-red-600':(r.delta>0?'text-emerald-600':'');
+        const clsY = r.deltaY<0?'text-red-600':(r.deltaY>0?'text-emerald-600':'');
+        return [
+          '<tr class="border-b">',
+            '<td class="px-2 py-2">',r.name,'</td>',
+            '<td class="px-2 py-2 text-right">',goal?fmtEuro(goal):'-','</td>',
+            '<td class="px-2 py-2 text-right">',fmtEuro(val),'</td>',
+            '<td class="px-2 py-2">',bar,'</td>',
+            '<td class="px-2 py-2 text-right ',cls,'">',sgn,fmtEuro(r.delta),' (',r.prev,')</td>',
+            '<td class="px-2 py-2 text-right ',clsY,'">',sgnY,fmtEuro(r.deltaY),' (',r.prevYoY,')</td>',
+          '</tr>'
+        ].join('');
+      }).join('');
+
+      document.getElementById('rowsM').innerHTML=rows;
+
+      // attach sort handlers (intestazioni)
+      document.querySelectorAll('[data-sort]').forEach(th=>{
+        th.addEventListener('click', ()=>{
+          const key=th.getAttribute('data-sort');
+          const dir=(sortState.key===key && sortState.dir==='asc')?'desc':'asc';
+          saveSort({key,dir});
+          paintMonthlyTable();
+        });
+      });
+    }
+
+    function paintWeeklyTable(){
+      const Y=Number(document.getElementById('yearW').value||new Date().getFullYear());
+      const W=Number(document.getElementById('weekW').value||1);
+      const prevY = (W===1)? (Y-1) : Y;
+      const prevW = (W===1)? 52 : (W-1);
+
+      // costruiamo data per sorting
+      let sortW=lsGet('fattSortW', {key:'amount', dir:'desc'});
+      function saveSortW(s){ sortW=s; lsSet('fattSortW', s); }
+
+      const data=clients.map(c=>{
+        const amt = weekAmount(c.id,Y,W);
+        const prv = weekAmount(c.id,prevY,prevW);
+        return {id:c.id, name:c.name, amount:amt, deltaW:(amt-prv)};
+      });
+
+      data.sort((A,B)=>{
+        const k=sortW.key, d=sortW.dir;
+        if(k==='name')   return cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
+        if(k==='amount') return cmp(A.amount, B.amount, d);
+        if(k==='deltaW') return cmp(A.deltaW, B.deltaW, d);
+        return 0;
+      });
+
+      const rows=data.map(r=>{
+        const cls  = r.deltaW<0?'text-red-600':(r.deltaW>0?'text-emerald-600':'');
+        const sgn  = r.deltaW>0?'+':'';
+        return [
+          '<tr class="border-b">',
+            '<td class="px-2 py-2">',r.name,'</td>',
+            '<td class="px-2 py-2 text-right">',fmtEuro(r.amount),'</td>',
+            '<td class="px-2 py-2 text-right ',cls,'">',sgn,fmtEuro(r.deltaW),'</td>',
+          '</tr>'
+        ].join('');
+      }).join('');
+
+      const tbody=document.getElementById('rowsW');
+      if(tbody){ tbody.innerHTML=rows; }
+
+      // attach sort handlers (settimanale)
+      document.querySelectorAll('[data-sortw]').forEach(th=>{
+        th.addEventListener('click', ()=>{
+          const key=th.getAttribute('data-sortw');
+          const dir=(sortW.key===key && sortW.dir==='asc')?'desc':'asc';
+          saveSortW({key,dir});
+          paintWeeklyTable();
+        });
+      });
+    }
+
+    // ====== Grafici ======
+    const months=[]; const now=new Date();
+    for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); const ym=d.toISOString().slice(0,7); months.push(ym); }
     const totals=months.map(m=> getSales().filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
     drawLine('chartTot', months, totals);
 
@@ -927,165 +1060,147 @@ async function ensureFirebaseConnected(){
       const ser=labs.map(m=> getSales().filter(s=>s.clientId===id && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0) );
       drawLine('chartClient', labs, ser);
     }
-    document.getElementById('selClient').addEventListener('change',paintClientChart);
-    document.getElementById('yearYTD').addEventListener('input',paintClientChart);
+
+    // Initial paints
+    paintMonthlyTable();
+    paintWeeklyTable();
     paintClientChart();
 
-    // change mese
-    const mEl=document.getElementById('m'); mEl && mEl.addEventListener('change', paint);
+    // Handlers UI
+    document.getElementById('m').addEventListener('change', paintMonthlyTable);
+    document.getElementById('yearW').addEventListener('input', paintWeeklyTable);
+    document.getElementById('weekW').addEventListener('input', paintWeeklyTable);
+    document.getElementById('selClient').addEventListener('change', paintClientChart);
+    document.getElementById('yearYTD').addEventListener('input', paintClientChart);
 
-    // export csv
+    // Export CSV (mensile)
     document.getElementById('exportCSV').addEventListener('click', ()=>{
       const rows=[['client_code','client_name','month','amount']];
       const mapName=Object.fromEntries(getClients().map(c=>[c.id,c.name])); const mapCode=Object.fromEntries(getClients().map(c=>[c.id,c.code||'']));
       getSales().forEach(s=>{ rows.push([mapCode[s.clientId]||'', mapName[s.clientId]||'', s.month, String(s.amount||0)]); });
-      const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace(/"/g,'""')+'"'):v).join(',')).join('\r\n');
+      const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"' + String(v).replace(/"/g,'""') + '"'):v).join(',')).join('\r\n');
       const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clienti_mese.csv'; a.click();
     });
 
-    // —— IMPORT handler
+    // Import CSV (mensile/settimanale/annuale YTD)
     document.getElementById('doImport').addEventListener('click', async ()=>{
       const file=document.getElementById('impFile').files?.[0]; if(!file){ alert('Seleziona un CSV'); return; }
       const type=document.getElementById('impType').value;
+      const text=await file.text();
 
-      // helpers
-      const norm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
-      function matchClientBy(name, code){
-        if(code){ const m=getClients().find(c => norm(c.code||'')===norm(code)); if(m) return m; }
-        if(name){ const m=getClients().find(c => norm(c.name||'')===norm(name)); if(m) return m; }
+      // parser semplice ; o ,
+      function parseCSV(text){
+        const firstLine=(text.split(/\r?\n/)[0]||'');
+        const delim = firstLine.includes(';') ? ';' : ',';
+        const rows=text.split(/\r?\n/).filter(r=>r.trim().length).map(r=>r.split(delim));
+        return {header:rows[0].map(h=>h.trim()), rows:rows.slice(1)};
+      }
+      const tab=parseCSV(text);
+      const h=tab.header.map(x=>x.toLowerCase());
+      const idx=(name)=> h.indexOf(name.toLowerCase());
+
+      function matchClient(name, code){
+        if(code){ const m=getClients().find(c=>(c.code||'').toLowerCase()===String(code).toLowerCase()); if(m) return m.id; }
+        if(name){ const m=getClients().find(c=>(c.name||'').toLowerCase()===String(name).toLowerCase()); if(m) return m.id; }
         return null;
       }
 
-      if(type==='monthly'){
-        const text=await file.text(); const tab=parseCSV(text);
-        const h=tab.header.map(x=>norm(x));
-        const idx=(...names)=> names.map(norm).map(n=>h.indexOf(n)).find(i=>i>=0);
-        const ic= idx('cliente','cliente_nome','ragione sociale');
-        const icode= idx('codice','cliente_codice','codice cliente');
-        const im= idx('mese','month');
-        const ia= idx('importo','amount');
-        if(ic==null || im==null || ia==null || ic<0 || im<0 || ia<0){ alert('CSV mensile: servono colonne cliente, mese (YYYY-MM) e importo'); return; }
-        let changed=0;
-        tab.rows.forEach(r=>{
-          const name=String(r[ic]||'').trim(); const code=String(r[icode]||'').trim();
-          const cli=matchClientBy(name, code); if(!cli) return;
-          const m=(r[im]||'').trim(); const amt=normalizeAmount(r[ia]);
-          if(!m || !amt) return;
-          setSales([...getSales(), {id:nextId('S'), clientId:cli.id, month:m, amount:amt}]);
-          changed++;
-        });
-        alert('Import: '+changed+' righe aggiunte');
-        paint();
-        return;
-      }
+      let changed=0;
 
-      if(type==='weekly'){
-        const text=await file.text(); const tab=parseCSV(text);
-        const h=tab.header.map(x=>norm(x));
-        const idx=(name)=> h.indexOf(norm(name));
+      if(type==='monthly'){
+        const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale');
+        const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
+        const im= idx('mese')>-1?idx('mese'): idx('month');
+        const ia= idx('importo')>-1?idx('importo'): idx('amount');
+        if(ic<0 || im<0 || ia<0){ alert('CSV mensile: servono colonne cliente, mese (YYYY-MM) e importo'); return; }
+        tab.rows.forEach(r=>{
+          const name=r[ic]?.trim(); const code=r[icode]?.trim(); const id=matchClient(name, code); if(!id) return;
+          const m=(r[im]||'').trim(); const amt=parseFloat(String(r[ia]||'0').replace(/\./g,'').replace(',','.'))||0;
+          if(!m) return;
+          sales=[...getSales(), {id:nextId('S'), clientId:id, month:m, amount:amt}];
+          setSales(sales); changed++;
+        });
+
+      } else if(type==='weekly'){
         const year=Number(document.getElementById('impYear').value||new Date().getFullYear());
         const weeks=(document.getElementById('impWeeks').value||'').split(',').map(x=>Number(x.trim())).filter(Boolean);
         if(!weeks.length){ alert('Specifica le settimane (es. 40,41,42,43)'); return; }
-        const ic= h.findIndex(x=>x.includes('cliente'))>=0 ? h.findIndex(x=>x.includes('cliente')) : 0;
-        const icode= h.findIndex(x=>x.includes('codice'));
+        const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale')>-1?idx('ragione sociale'):0;
+        const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
+
         let salesWLocal=[...getSalesW()];
         let salesLocal=[...getSales()];
         const touchedPairs=new Set();
+
         tab.rows.forEach(r=>{
-          const name=r[ic]?.trim(); const code=r[icode]?.trim(); const cli=matchClientBy(name, code); if(!cli) return;
+          const name=r[ic]?.trim(); const code=r[icode]?.trim(); const id=matchClient(name, code); if(!id) return;
           weeks.forEach(w=>{
             let colIndex = h.findIndex(col => col.replace(/\s+/g,'').includes(String(w)));
             if(colIndex<0) return;
-            const amt=normalizeAmount(r[colIndex]||0);
+            const amt=parseFloat(String(r[colIndex]||'0').replace(/\./g,'').replace(',','.'))||0;
             const date=isoWeekStart(year, w).toISOString().slice(0,10);
             const monthKey=date.slice(0,7);
-            const idxW = salesWLocal.findIndex(x=>x.clientId===cli.id && x.year===year && x.week===w);
-            if(idxW>=0) salesWLocal[idxW] = {...salesWLocal[idxW], amount:amt, dateISO:date};
-            else salesWLocal.push({id:nextId('W'), clientId:cli.id, year, week:w, dateISO:date, amount:amt});
-            touchedPairs.add(cli.id+'|'+monthKey);
+            const idxW = salesWLocal.findIndex(x=>x.clientId===id && x.year===year && x.week===w);
+            if(idxW>=0){ salesWLocal[idxW] = {...salesWLocal[idxW], amount:amt, dateISO:date}; }
+            else { salesWLocal.push({id:nextId('W'), clientId:id, year, week:w, dateISO:date, amount:amt}); }
+            touchedPairs.add(id+'|'+monthKey);
           });
         });
+
         touchedPairs.forEach(pair=>{
-          const [cid, m]=pair.split('|');
+          const [cid, m] = pair.split('|');
           const sumW = salesWLocal.filter(x=>x.clientId===cid && x.dateISO.slice(0,7)===m)
-                          .reduce((a,b)=>a+Number(b.amount||0),0);
+                        .reduce((a,b)=>a+Number(b.amount||0),0);
           const idxM = salesLocal.findIndex(x=>x.clientId===cid && x.month===m && x.source==='weekly');
           const rec = {id: idxM>=0? salesLocal[idxM].id : nextId('S'), clientId:cid, month:m, amount:sumW, source:'weekly'};
-          if(idxM>=0) salesLocal[idxM]=rec; else salesLocal.push(rec);
-        });
-        setSalesW(salesWLocal); setSales(salesLocal);
-        alert('Import: aggiornati '+touchedPairs.size+' client×mese');
-        paint();
-        return;
-      }
-
-      // ——— Annuale (YTD) ———
-      if(type==='yearToDate'){
-        const year=Number(document.getElementById('impYearYTD').value||new Date().getFullYear());
-        const text=await file.text();
-        const lines=text.split(/\r?\n/).filter(l=>l.trim().length);
-        const sep = lines[0].includes(';') ? ';' : ',';
-        const rows = lines.map(l=>l.split(sep));
-
-        // trova la riga header con "Cliente Codice" (normalizzato, senza accenti)
-        let hdrIdx = rows.findIndex(r => r.some(c => norm(c).includes('cliente codice') || norm(c).includes('cliente cod')));
-        if(hdrIdx<0){ alert('Formato YTD non riconosciuto (manca intestazione "Cliente Codice")'); return; }
-
-        // la riga precedente contiene i NUMERI delle settimane
-        const weekRow = rows[hdrIdx-1] || [];
-        // mappa: [indiceColonna, numeroSettimana]
-        const weekMap=[];
-        for(let col=3; col<rows[hdrIdx].length-1; col++){ // skip prime 3 (agente, cliente, codice) e l'ultima (Importo totale)
-          const wk = parseInt(String(weekRow[col]||'').replace(/\D/g,''),10);
-          if(wk>0 && wk<=53) weekMap.push([col,wk]);
-        }
-        if(!weekMap.length){ alert('Formato YTD: non ho trovato numeri di settimana nella riga superiore'); return; }
-
-        let salesWLocal=[...getSalesW()];
-        let salesLocal=[...getSales()];
-        const touchedPairs=new Set();
-
-        for(let i=hdrIdx+1; i<rows.length; i++){
-          const r=rows[i];
-          const name=(r[1]||'').trim();
-          const code=(r[2]||'').trim();
-          if(!name && !code) continue;
-          const cli=matchClientBy(name, code); if(!cli) continue;
-
-          for(const [col,w] of weekMap){
-            const raw = r[col];
-            if(!raw || !raw.trim()) continue;
-            const amt = normalizeAmount(raw);
-            if(!amt) continue;
-
-            const dateISO = isoWeekStart(year, w).toISOString().slice(0,10);
-            const monthKey = dateISO.slice(0,7);
-
-            const idxW = salesWLocal.findIndex(x=>x.clientId===cli.id && x.year===year && x.week===w);
-            if(idxW>=0) salesWLocal[idxW] = {...salesWLocal[idxW], amount:amt, dateISO};
-            else salesWLocal.push({id:nextId('W'), clientId:cli.id, year, week:w, dateISO, amount:amt});
-
-            touchedPairs.add(cli.id+'|'+monthKey);
-          }
-        }
-
-        touchedPairs.forEach(pair=>{
-          const [cid, m]=pair.split('|');
-          const sumW = salesWLocal.filter(x=>x.clientId===cid && x.dateISO.slice(0,7)===m)
-                          .reduce((a,b)=>a+Number(b.amount||0),0);
-          const idxM = salesLocal.findIndex(x=>x.clientId===cid && x.month===m && (x.source==='weekly' || x.source==='weeklyYTD'));
-          const rec = {id: idxM>=0? salesLocal[idxM].id : nextId('S'), clientId:cid, month:m, amount:sumW, source:'weeklyYTD'};
           if(idxM>=0) salesLocal[idxM]=rec; else salesLocal.push(rec);
         });
 
         setSalesW(salesWLocal);
         setSales(salesLocal);
-        alert('Import (YTD): aggiornati '+touchedPairs.size+' client×mese');
-        paint();
-        return;
+        weekSales=salesWLocal; sales=salesLocal;
+        changed=touchedPairs.size;
+
+      } else if(type==='annual'){
+        // Annuale YTD: colonne gen,feb,...,dic (o 1..12)
+        const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale');
+        const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
+        if(ic<0 && icode<0){ alert('CSV annuale: serve almeno Cliente o Codice'); return; }
+        const monthNames=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+        const mapIdx = monthNames.map(n=>{
+          let i=h.indexOf(n); if(i<0){ // prova con numeri "1","2",...
+            i=h.indexOf(String(monthNames.indexOf(n)+1));
+          }
+          return i;
+        });
+        const year = Number(document.getElementById('impYear').value||new Date().getFullYear());
+        if(mapIdx.every(i=>i<0)){ alert('CSV annuale: non trovo colonne mesi (gen..dic o 1..12)'); return; }
+
+        let salesLocal=[...getSales()];
+        tab.rows.forEach(r=>{
+          const name=r[ic]?.trim(); const code=r[icode]?.trim(); const id=matchClient(name, code); if(!id) return;
+          mapIdx.forEach((col,i)=>{
+            if(col<0) return;
+            const amt=parseFloat(String(r[col]||'0').replace(/\./g,'').replace(',','.'))||0;
+            const m=year+'-'+String(i+1).padStart(2,'0');
+            salesLocal.push({id:nextId('S'), clientId:id, month:m, amount:amt, source:'annual'});
+          });
+        });
+        setSales(salesLocal); sales=salesLocal; changed++;
       }
+
+      alert('Import: aggiornati '+changed+' record');
+      // repaint viste
+      paintMonthlyTable();
+      paintWeeklyTable();
+      // aggiorna grafico totale
+      const months=[]; const now=new Date();
+      for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); const ym=d.toISOString().slice(0,7); months.push(ym); }
+      const totals=months.map(m=> getSales().filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
+      drawLine('chartTot', months, totals);
     });
   }
+
   paint();
 }
 
