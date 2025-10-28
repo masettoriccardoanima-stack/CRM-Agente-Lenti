@@ -844,26 +844,26 @@ async function ensureFirebaseConnected(){
     }
     function normalizeAmount(s){ if(s==null) return 0; s=String(s).replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
 
-    // ================== FATTURATI & STATISTICHE (versione con ANNUALE + EXPORT) ==================
+    // ================== FATTURATI (unica tabella: Anno oppure Mese) ==================
 function renderFatturati(root){
-  const VERSION = 'FATTURATI v28-10-ANNUALE';
+  // stato UI locale
+  window._uiFatt = window._uiFatt || { showImport:false };
+  const nowYM = yyyymm();
+  const defY  = +nowYM.slice(0,4);
+  const defM  = nowYM.slice(5);
+  let mode = lsGet('fattMode','month'); // 'month' | 'year'
+  let sortState = lsGet('fattSortUnified', { key: mode==='year'?'amountY':'amount', dir:'desc' });
 
-  // --- dati ---
+  // dati base
   const clients = getClients();
   const sales   = getSales();   // {clientId, month:'YYYY-MM', amount}
   const salesW  = getSalesW();  // {clientId, year, week, dateISO, amount}
 
-  // --- util ---
+  // util
   const _euro = n => fmtEuro(Number(n)||0);
   const _cmp  = (a,b,dir) => dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0));
-  const nowYM = yyyymm();
-  const defY  = +nowYM.slice(0,4);
-  const defM  = nowYM.slice(5);
   const years = [defY-3,defY-2,defY-1,defY];
   const months = [['01','Gennaio'],['02','Febbraio'],['03','Marzo'],['04','Aprile'],['05','Maggio'],['06','Giugno'],['07','Luglio'],['08','Agosto'],['09','Settembre'],['10','Ottobre'],['11','Novembre'],['12','Dicembre']];
-  let sortM=lsGet('fattSort',{key:'amount',dir:'desc'});
-  let sortW=lsGet('fattSortW',{key:'amount',dir:'desc'});
-  let sortY=lsGet('fattSortY',{key:'amountY',dir:'desc'});
 
   function monthKey(y,m){ return `${y}-${m}`; }
   function monthlyRow(c,y,m){
@@ -873,7 +873,7 @@ function renderFatturati(root){
     const yoy  = `${y-1}-${m}`;
     const prv = sales.filter(s=>s.clientId===c.id && s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
     const yv  = sales.filter(s=>s.clientId===c.id && s.month===yoy ).reduce((a,b)=>a+Number(b.amount||0),0);
-    return { id:c.id, name:c.name, goal:Number(c.goalMonthly||0), amount:cur, delta:cur-prv, deltaY:cur-yv, prev, prevYoY:yoy };
+    return { id:c.id, code:c.code||'', name:c.name, goal:Number(c.goalMonthly||0), amount:cur, delta:cur-prv, deltaY:cur-yv, prev, prevYoY:yoy };
   }
   function yearlyTotals(c,Y){
     let tot=0, prev=0;
@@ -884,18 +884,14 @@ function renderFatturati(root){
       prev += sales.filter(s=>s.clientId===c.id&&s.month===mP).reduce((a,b)=>a+Number(b.amount||0),0);
     }
     const goalY = Number(c.goalMonthly||0)*12;
-    return { id:c.id, name:c.name, amountY:tot, goalY, deltaYG:tot-goalY, deltaYoY:tot-prev };
-  }
-  function weekAmt(cid,Y,W){
-    const r=salesW.find(x=>x.clientId===cid&&x.year===Y&&x.week===W);
-    return Number((r||{}).amount||0);
+    return { id:c.id, code:c.code||'', name:c.name, amountY:tot, goalY, deltaYG:tot-goalY, deltaYoY:tot-prev };
   }
   function lastWeek(){
     const set=new Set(salesW.map(w=>w.year+'|'+w.week));
     const arr=[...set].map(s=>({y:+s.split('|')[0], w:+s.split('|')[1]})).sort((a,b)=>a.y-b.y||a.w-b.w);
     return arr.length ? {year:arr[arr.length-1].y, week:arr[arr.length-1].w} : {year:defY, week:1};
   }
-  function _draw(canvasId, labels, series){
+  function drawLine(canvasId, labels, series){
     const c=document.getElementById(canvasId); if(!c) return;
     const ctx=c.getContext('2d'), w=c.width=c.clientWidth, h=c.height=200, pad=20;
     ctx.clearRect(0,0,w,h);
@@ -907,162 +903,303 @@ function renderFatturati(root){
     labels.forEach((l,i)=>{ const x=pad+i*stepX; ctx.fillText(l.slice(5), x-8, h-6); });
   }
 
-  // --- UI ---
+  // UI
   root.innerHTML = [
     '<div class="space-y-4">',
-      '<div class="text-xs text-slate-500">',VERSION,'</div>',
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Import CSV</h3></div>',
-        '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
-          '<select id="impType" class="border rounded-xl px-3 py-2">',
-            '<option value="monthly">Mensile (cliente,mese,importo)</option>',
-            '<option value="weekly">Settimanale (cliente,week40,week41,...)</option>',
-            '<option value="annual">Annuale YTD (cliente,gen..dic)</option>',
-          '</select>',
-          '<input id="impYear" class="border rounded-xl px-3 py-2" type="number" placeholder="Anno">',
-          '<input id="impWeeks" class="border rounded-xl px-3 py-2 md:col-span-2" placeholder="Settimane (es. 40,41,42)">',
-          '<input id="impFile" type="file" accept=".csv,text/csv" class="md:col-span-2">',
-          '<div class="md:col-span-6 text-right"><button id="doImport" class="btn-primary">Importa</button></div>',
+
+      // ====== CARD PRINCIPALE: selettori + EXPORT/STAMPA in alto a destra
+      '<div class="card" id="cardMain">',
+        '<div class="card-h">',
+          '<div class="flex items-center gap-2 flex-wrap">',
+            '<h3 class="font-semibold mr-2">Fatturati</h3>',
+            '<label class="text-sm">Periodo ',
+              '<select id="periodMode" class="border rounded-xl px-2 py-1 text-sm">',
+                '<option value="year">Anno intero</option>',
+                '<option value="month">Mese</option>',
+              '</select>',
+            '</label>',
+            '<select id="selYear" class="border rounded-xl px-2 py-1 text-sm">',
+              years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join(''),
+            '</select>',
+            '<select id="selMonth" class="border rounded-xl px-2 py-1 text-sm hidden">',
+              months.map(([k,l])=>`<option value="${k}" ${k===defM?'selected':''}>${l}</option>`).join(''),
+            '</select>',
+          '</div>',
+          '<div class="flex-1"></div>',
+          '<div class="flex items-center gap-2">',
+            '<button id="btnImport" class="btn">Import</button>',
+            '<button id="btnExport" class="btn">⬇️ Export CSV</button>',
+            '<button id="btnPrint"  class="btn">🖨️ Stampa/PDF</button>',
+          '</div>',
+        '</div>',
+
+        // pannello import (toggle)
+        (window._uiFatt.showImport ? [
+          '<div class="card-b border-b bg-slate-50/50">',
+            '<form id="fImport" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+              '<select id="impType" class="border rounded-xl px-3 py-2">',
+                '<option value="monthly">Mensile (cliente, mese YYYY-MM, importo)</option>',
+                '<option value="annual">Annuale YTD (cliente, gen..dic)</option>',
+              '</select>',
+              '<input id="impYear" class="border rounded-xl px-3 py-2" type="number" placeholder="Anno (per annuale)">',
+              '<input id="impFile" type="file" accept=".csv,text/csv" class="md:col-span-3">',
+              '<div class="text-right md:col-span-1"><button id="doImport" class="btn-primary">Importa</button></div>',
+            '</form>',
+            '<div class="text-xs text-slate-500 mt-2">Suggerito: colonne <em>client_code</em> o <em>client_name</em>, <em>month</em> (YYYY-MM) e <em>amount</em>, oppure per Annuale 12 colonne da Gen a Dic.</div>',
+          '</div>'
+        ].join('') : ''),
+
+        // tabella dinamica (anno o mese)
+        '<div class="card-b overflow-auto">',
+          '<table class="min-w-full text-sm">',
+            '<thead class="bg-slate-100 text-slate-600" id="theadMain"></thead>',
+            '<tbody id="rowsMain"></tbody>',
+          '</table>',
         '</div>',
       '</div>',
 
-      // MENSILE
-      '<div class="card"><div class="card-h">',
-        '<h3 class="font-semibold">Riepilogo mese</h3>',
-        '<div class="flex items-center gap-2">',
-          '<select id="mYear" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join('') ,'</select>',
-          '<select id="mMonth" class="border rounded-xl px-3 py-2">', months.map(([k,l])=>`<option value="${k}" ${k===defM?'selected':''}>${l}</option>`).join('') ,'</select>',
+      // ====== RIEPILOGO SETTIMANALE (lasciato com’è)
+      (function(){ const lw=lastWeek(); return [
+        '<div class="card"><div class="card-h"><h3 class="font-semibold">Riepilogo settimanale</h3>',
+          '<div class="flex items-center gap-2">',
+            `<select id="wYear" class="border rounded-xl px-3 py-2">${years.map(y=>`<option ${y===lw.year?'selected':''}>${y}</option>`).join('')}</select>`,
+            `<select id="wWeek" class="border rounded-xl px-3 py-2">${Array.from({length:53},(_,i)=>i+1).map(w=>`<option ${w===lw.week?'selected':''}>${w}</option>`).join('')}</select>`,
+          '</div>',
+        '</div>',
+        '<div class="card-b overflow-auto"><table class="min-w-full text-sm">',
+          '<thead class="bg-slate-100 text-slate-600"><tr>',
+            '<th class="text-left px-2 py-2" data-sortw="name">Cliente</th>',
+            '<th class="text-right px-2 py-2" data-sortw="amount">Importo sett.</th>',
+            '<th class="text-right px-2 py-2" data-sortw="deltaW">Δ vs sett. prec.</th>',
+          '</tr></thead><tbody id="rowsW"></tbody></table></div>'
+      ].join(''); })(),
+
+      // ====== GRAFICI (totale + cliente YTD)
+      '<div class="card"><div class="card-h"><h3 class="font-semibold">Grafico mensile (totale)</h3></div><div class="card-b"><canvas id="chartTot" style="width:100%"></canvas></div></div>',
+      '<div class="card"><div class="card-h"><h3 class="font-semibold">Andamento cliente (YTD)</h3></div>',
+        '<div class="card-b">',
+          '<div class="flex items-center gap-2 mb-3">',
+            `<select id="selClient" class="border rounded-xl px-3 py-2">${clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select>`,
+            `<select id="yearYTD" class="border rounded-xl px-3 py-2">${years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join('')}</select>`,
+          '</div>',
+          '<canvas id="chartClient" style="width:100%"></canvas>',
         '</div>',
       '</div>',
-      '<div class="card-b overflow-auto">',
-        '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+
+    '</div>'
+  ].join('');
+
+  // inizializzazione selettori periodo
+  const selMode  = document.getElementById('periodMode');  selMode.value = mode;
+  const selYear  = document.getElementById('selYear');
+  const selMonth = document.getElementById('selMonth'); selMonth.classList.toggle('hidden', mode!=='month');
+
+  // ===== painters: tabella principale
+  function paintMain(){
+    const Y = +selYear.value;
+    const M = selMonth.value;
+    const thead = document.getElementById('theadMain');
+    const tbody = document.getElementById('rowsMain');
+
+    if(mode==='year'){
+      // header
+      thead.innerHTML = [
+        '<tr>',
+          '<th class="text-left px-2 py-2 cursor-pointer" data-sort="name">Cliente</th>',
+          '<th class="text-right px-2 py-2 cursor-pointer" data-sort="goalY">Obiettivo annuo</th>',
+          '<th class="text-right px-2 py-2 cursor-pointer" data-sort="amountY">Fatturato anno</th>',
+          '<th class="text-right px-2 py-2 cursor-pointer" data-sort="deltaYG">Δ vs obiettivo</th>',
+          '<th class="text-right px-2 py-2 cursor-pointer" data-sort="deltaYoY">Δ YoY</th>',
+        '</tr>'
+      ].join('');
+
+      const rows = clients.map(c=>yearlyTotals(c,Y)).sort((A,B)=>{
+        const k=sortState.key, d=sortState.dir;
+        if(k==='name')     return _cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
+        if(k==='goalY')    return _cmp(A.goalY,B.goalY,d);
+        if(k==='amountY')  return _cmp(A.amountY,B.amountY,d);
+        if(k==='deltaYG')  return _cmp(A.deltaYG,B.deltaYG,d);
+        if(k==='deltaYoY') return _cmp(A.deltaYoY,B.deltaYoY,d);
+        return 0;
+      }).map(r=>{
+        const clsG=r.deltaYG<0?'text-red-600':(r.deltaYG>0?'text-emerald-600':'');
+        const clsY=r.deltaYoY<0?'text-red-600':(r.deltaYoY>0?'text-emerald-600':'');
+        return [
+          '<tr class="border-b">',
+            '<td class="px-2 py-2">',r.name,'</td>',
+            '<td class="px-2 py-2 text-right">', r.goalY?_euro(r.goalY):'—','</td>',
+            '<td class="px-2 py-2 text-right">', _euro(r.amountY),'</td>',
+            '<td class="px-2 py-2 text-right ',clsG,'">', (r.deltaYG>0?'+':''), _euro(r.deltaYG),'</td>',
+            '<td class="px-2 py-2 text-right ',clsY,'">', (r.deltaYoY>0?'+':''), _euro(r.deltaYoY),'</td>',
+          '</tr>'
+        ].join('');
+      }).join('');
+      tbody.innerHTML = rows;
+
+    } else {
+      // mese
+      thead.innerHTML = [
+        '<tr>',
           '<th class="text-left px-2 py-2 cursor-pointer" data-sort="name">Cliente</th>',
           '<th class="text-right px-2 py-2 cursor-pointer" data-sort="goal">Obiettivo</th>',
           '<th class="text-right px-2 py-2 cursor-pointer" data-sort="amount">Fatturato</th>',
           '<th class="text-left  px-2 py-2">Avanzamento</th>',
           '<th class="text-right px-2 py-2 cursor-pointer" data-sort="delta">Δ MoM</th>',
           '<th class="text-right px-2 py-2 cursor-pointer" data-sort="deltaY">Δ YoY</th>',
-        '</tr></thead><tbody id="rowsM"></tbody></table>',
-        '<div class="mt-3 text-right"><button id="exportCSV" class="btn">⬇️ Export CSV cliente×mese</button></div>',
-      '</div></div>',
-
-      // ANNUALE (id="cardY" per stampa)
-      '<div class="card" id="cardY"><div class="card-h">',
-        '<h3 class="font-semibold">Riepilogo annuale</h3>',
-        '<div class="flex items-center gap-2">',
-          '<select id="yYear" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join('') ,'</select>',
-        '</div>',
-      '</div>',
-      '<div class="card-b overflow-auto">',
-        '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-          '<th class="text-left px-2 py-2 cursor-pointer" data-sorty="name">Cliente</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="goalY">Obiettivo annuo</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="amountY">Fatturato anno</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="deltaYG">Δ vs obiettivo</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="deltaYoY">Δ YoY</th>',
-        '</tr></thead><tbody id="rowsY"></tbody></table>',
-        '<div class="mt-3 text-right space-x-2">',
-          '<button id="exportCSVY" class="btn">⬇️ Export CSV annuo</button>',
-          '<button id="printY" class="btn">🖨️ Stampa/PDF</button>',
-        '</div>',
-      '</div></div>',
-
-      // SETTIMANALE
-      (function(){const lw=lastWeek();return [
-        '<div class="card"><div class="card-h"><h3 class="font-semibold">Riepilogo settimanale</h3>',
-          '<div class="flex items-center gap-2">',
-            '<select id="wYear" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===lw.year?'selected':''}>${y}</option>`).join('') ,'</select>',
-            '<select id="wWeek" class="border rounded-xl px-3 py-2">', Array.from({length:53},(_,i)=>i+1).map(w=>`<option ${w===lw.week?'selected':''}>${w}</option>`).join('') ,'</select>',
-          '</div>',
-        '</div>',
-        '<div class="card-b overflow-auto">',
-          '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-            '<th class="text-left px-2 py-2 cursor-pointer" data-sortw="name">Cliente</th>',
-            '<th class="text-right px-2 py-2 cursor-pointer" data-sortw="amount">Importo sett.</th>',
-            '<th class="text-right px-2 py-2 cursor-pointer" data-sortw="deltaW">Δ vs sett. prec.</th>',
-          '</tr></thead><tbody id="rowsW"></tbody></table>',
-        '</div></div>'
-      ].join('');})(),
-
-      // GRAFICI
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Grafico mensile (totale)</h3></div>',
-        '<div class="card-b"><canvas id="chartTot" style="width:100%"></canvas></div>',
-      '</div>',
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Andamento cliente (YTD)</h3></div>',
-        '<div class="card-b">',
-          '<div class="flex items-center gap-2 mb-3">',
-            '<select id="selClient" class="border rounded-xl px-3 py-2">', clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('') ,'</select>',
-            '<select id="yearYTD" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join('') ,'</select>',
-          '</div>',
-          '<canvas id="chartClient" style="width:100%"></canvas>',
-        '</div>',
-      '</div>',
-    '</div>'
-  ].join('');
-
-  // ===== painters =====
-  function paintMonthly(){
-    const y=+document.getElementById('mYear').value, m=document.getElementById('mMonth').value;
-    const rows = clients.map(c=>monthlyRow(c,y,m)).sort((A,B)=>{
-      const k=sortM.key,d=sortM.dir;
-      if(k==='name')   return _cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
-      if(k==='goal')   return _cmp(A.goal,B.goal,d);
-      if(k==='amount') return _cmp(A.amount,B.amount,d);
-      if(k==='delta')  return _cmp(A.delta,B.delta,d);
-      if(k==='deltaY') return _cmp(A.deltaY,B.deltaY,d);
-      return 0;
-    }).map(r=>{
-      const pct = r.goal ? Math.min(100, Math.round(100*r.amount/r.goal)) : null;
-      const bar = `<div class="w-40 h-2 bg-slate-200 rounded-full overflow-hidden"><div style="width:${pct||0}%;height:100%" class="bg-blue-500"></div></div> ${pct!=null?(pct+'%'):'—'}`;
-      const cls = r.delta<0?'text-red-600':(r.delta>0?'text-emerald-600':'');
-      const clsY= r.deltaY<0?'text-red-600':(r.deltaY>0?'text-emerald-600':'');
-      return [
-        '<tr class="border-b">',
-          '<td class="px-2 py-2">',r.name,'</td>',
-          '<td class="px-2 py-2 text-right">', r.goal?_euro(r.goal):'—','</td>',
-          '<td class="px-2 py-2 text-right">', _euro(r.amount),'</td>',
-          '<td class="px-2 py-2">', bar ,'</td>',
-          '<td class="px-2 py-2 text-right ',cls,'">', (r.delta>0?'+':''), _euro(r.delta),' (',r.prev,')</td>',
-          '<td class="px-2 py-2 text-right ',clsY,'">', (r.deltaY>0?'+':''), _euro(r.deltaY),' (',r.prevYoY,')</td>',
         '</tr>'
       ].join('');
-    }).join('');
-    document.getElementById('rowsM').innerHTML = rows;
-    document.querySelectorAll('[data-sort]').forEach(th=>th.onclick=()=>{ const key=th.getAttribute('data-sort'); const dir=(sortM.key===key&&sortM.dir==='asc')?'desc':'asc'; sortM={key,dir}; lsSet('fattSort',sortM); paintMonthly(); });
+
+      const rows = clients.map(c=>monthlyRow(c,Y,M)).sort((A,B)=>{
+        const k=sortState.key, d=sortState.dir;
+        if(k==='name')   return _cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
+        if(k==='goal')   return _cmp(A.goal,B.goal,d);
+        if(k==='amount') return _cmp(A.amount,B.amount,d);
+        if(k==='delta')  return _cmp(A.delta,B.delta,d);
+        if(k==='deltaY') return _cmp(A.deltaY,B.deltaY,d);
+        return 0;
+      }).map(r=>{
+        const pct = r.goal ? Math.min(100, Math.round(100*r.amount/r.goal)) : null;
+        const bar = `<div class="w-40 h-2 bg-slate-200 rounded-full overflow-hidden"><div style="width:${pct||0}%;height:100%" class="bg-blue-500"></div></div> ${pct!=null?(pct+'%'):'—'}`;
+        const cls = r.delta<0?'text-red-600':(r.delta>0?'text-emerald-600':'');
+        const clsY= r.deltaY<0?'text-red-600':(r.deltaY>0?'text-emerald-600':'');
+        return [
+          '<tr class="border-b">',
+            '<td class="px-2 py-2">',r.name,'</td>',
+            '<td class="px-2 py-2 text-right">', r.goal?_euro(r.goal):'—','</td>',
+            '<td class="px-2 py-2 text-right">', _euro(r.amount),'</td>',
+            '<td class="px-2 py-2">', bar ,'</td>',
+            '<td class="px-2 py-2 text-right ',cls,'">', (r.delta>0?'+':''), _euro(r.delta),' (',r.prev,')</td>',
+            '<td class="px-2 py-2 text-right ',clsY,'">', (r.deltaY>0?'+':''), _euro(r.deltaY),' (',r.prevYoY,')</td>',
+          '</tr>'
+        ].join('');
+      }).join('');
+      tbody.innerHTML = rows;
+    }
+
+    // sort handlers
+    document.querySelectorAll('#theadMain [data-sort]').forEach(th=>th.addEventListener('click', ()=>{
+      const key=th.getAttribute('data-sort');
+      const dir=(sortState.key===key && sortState.dir==='asc')?'desc':'asc';
+      sortState={key,dir}; lsSet('fattSortUnified',sortState); paintMain();
+    }));
   }
 
-  function paintYearly(){
-    const Y=+document.getElementById('yYear').value;
-    const rows = clients.map(c=>yearlyTotals(c,Y)).sort((A,B)=>{
-      const k=sortY.key,d=sortY.dir;
-      if(k==='name')     return _cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
-      if(k==='goalY')    return _cmp(A.goalY,B.goalY,d);
-      if(k==='amountY')  return _cmp(A.amountY,B.amountY,d);
-      if(k==='deltaYG')  return _cmp(A.deltaYG,B.deltaYG,d);
-      if(k==='deltaYoY') return _cmp(A.deltaYoY,B.deltaYoY,d);
-      return 0;
-    }).map(r=>{
-      const clsG=r.deltaYG<0?'text-red-600':(r.deltaYG>0?'text-emerald-600':'');
-      const clsY=r.deltaYoY<0?'text-red-600':(r.deltaYoY>0?'text-emerald-600':'');
-      return [
-        '<tr class="border-b">',
-          '<td class="px-2 py-2">',r.name,'</td>',
-          '<td class="px-2 py-2 text-right">', r.goalY?_euro(r.goalY):'—','</td>',
-          '<td class="px-2 py-2 text-right">', _euro(r.amountY),'</td>',
-          '<td class="px-2 py-2 text-right ',clsG,'">', (r.deltaYG>0?'+':''), _euro(r.deltaYG),'</td>',
-          '<td class="px-2 py-2 text-right ',clsY,'">', (r.deltaYoY>0?'+':''), _euro(r.deltaYoY),'</td>',
-        '</tr>'
-      ].join('');
-    }).join('');
-    document.getElementById('rowsY').innerHTML = rows;
-    document.querySelectorAll('[data-sorty]').forEach(th=>th.onclick=()=>{ const key=th.getAttribute('data-sorty'); const dir=(sortY.key===key&&sortY.dir==='asc')?'desc':'asc'; sortY={key,dir}; lsSet('fattSortY',sortY); paintYearly(); });
+  // ===== export corrente (in alto a destra)
+  function exportCurrentCSV(){
+    const Y=+selYear.value, M=selMonth.value;
+    if(mode==='year'){
+      const rows=[['client_code','client_name','year','amount','annual_goal','delta_vs_goal','delta_yoy']];
+      const mapCode=Object.fromEntries(clients.map(c=>[c.id,c.code||'']));
+      clients.forEach(c=>{
+        const r=yearlyTotals(c,Y);
+        rows.push([mapCode[c.id]||'', r.name, String(Y), String(r.amountY||0), String(r.goalY||0), String(r.deltaYG||0), String(r.deltaYoY||0)]);
+      });
+      const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace(/"/g,'""')+'"'):v).join(',')).join('\r\n');
+      const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download=`fatturato_annuale_${Y}.csv`; a.click();
+    } else {
+      const rows=[['client_code','client_name','year','month','amount','goal','delta_mom','delta_yoy','prev_month','prev_yoy_month']];
+      const mapCode=Object.fromEntries(clients.map(c=>[c.id,c.code||'']));
+      clients.forEach(c=>{
+        const r=monthlyRow(c,Y,M);
+        rows.push([mapCode[c.id]||'', r.name, String(Y), String(M), String(r.amount||0), String(r.goal||0), String(r.delta||0), String(r.deltaY||0), r.prev, r.prevYoY]);
+      });
+      const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace(/"/g,'""')+'"'):v).join(',')).join('\r\n');
+      const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download=`fatturato_${Y}-${M}.csv`; a.click();
+    }
   }
 
+  // ===== stampa/PDF card principale
+  function printMain(){
+    const node=document.getElementById('cardMain'); const w=window.open('','_blank');
+    const Y=+selYear.value, M=selMonth.value;
+    const titolo = mode==='year' ? `Riepilogo annuale ${Y}` : `Riepilogo ${Y}-${M}`;
+    w.document.write(`<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${titolo}</title>
+      <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;color:#0f172a}
+      h1{font-size:18px;margin:0 0 12px}table{width:100%;border-collapse:collapse;font-size:12px}
+      th,td{border:1px solid #e2e8f0;padding:6px 8px;text-align:right}th{text-align:left;background:#f1f5f9;color:#475569}
+      td:first-child,th:first-child{text-align:left}</style></head><body>
+      <h1>${titolo}</h1>${node.querySelector('table')?.outerHTML || node.innerHTML}</body></html>`);
+    w.document.close(); w.focus(); w.print();
+  }
+
+  // ===== Import (pannello dietro pulsante)
+  function toggleImport(){ window._uiFatt.showImport=!window._uiFatt.showImport; renderFatturati(document.getElementById('view')); }
+
+  function doImportHandler(e){
+    e.preventDefault();
+    const type = document.getElementById('impType').value;
+    const year = +document.getElementById('impYear').value || defY;
+    const file = document.getElementById('impFile').files?.[0];
+    if(!file){ alert('Seleziona un CSV'); return; }
+    file.text().then(text=>{
+      const {header, rows} = parseCSV(text);
+      const H = header.map(h=>h.toLowerCase().trim());
+      const idx = (names)=>{ for(const n of names){ const i=H.indexOf(n.toLowerCase()); if(i>-1) return i; } return -1; };
+      const iCode = idx(['client_code','codice','codice cliente','code']);
+      const iName = idx(['client_name','cliente','ragione sociale','nome']);
+      if(type==='monthly'){
+        const iMonth = idx(['month','mese']);
+        const iAmt   = idx(['amount','importo','fatturato','valore']);
+        if(iMonth<0 || iAmt<0 || (iCode<0 && iName<0)){ alert('CSV non valido (servono: cliente + month + amount)'); return; }
+        let list = getSales(); let add=0, upd=0, skip=0;
+        rows.forEach(r=>{
+          const code = iCode>-1 ? (r[iCode]||'').trim() : '';
+          const name = iName>-1 ? (r[iName]||'').trim() : '';
+          const month = (r[iMonth]||'').trim();
+          const amount = normalizeAmount(r[iAmt]||'0');
+          if(!month){ skip++; return; }
+          const cli = clients.find(c=> (code && c.code===code) || (!code && name && (c.name||'').toLowerCase()===name.toLowerCase()));
+          if(!cli){ skip++; return; }
+          // rimuovi eventuale entry esistente per quel clientId+month
+          list = list.filter(x=> !(x.clientId===cli.id && x.month===month) );
+          list.push({clientId:cli.id, month, amount});
+          add++;
+        });
+        setSales(list);
+        alert(`Import mensile: ${add} righe importate, ${skip} scartate`);
+      } else {
+        // annuale YTD: colonne gen..dic
+        const findCol = (labels)=> labels.findIndex(l=>H.includes(l));
+        const iJan=findCol(['gen','gennaio','01']); const iFeb=findCol(['feb','febbraio','02']); const iMar=findCol(['mar','marzo','03']);
+        const iApr=findCol(['apr','aprile','04']);  const iMay=findCol(['mag','maggio','05']); const iJun=findCol(['giu','giugno','06']);
+        const iJul=findCol(['lug','luglio','07']);  const iAug=findCol(['ago','agosto','08']); const iSep=findCol(['set','settembre','09']);
+        const iOct=findCol(['ott','ottobre','10']); const iNov=findCol(['nov','novembre','11']); const iDec=findCol(['dic','dicembre','12']);
+        const idxs=[iJan,iFeb,iMar,iApr,iMay,iJun,iJul,iAug,iSep,iOct,iNov,iDec];
+        if((iCode<0 && iName<0) || idxs.every(i=>i<0)){ alert('CSV annuale non riconosciuto (serve cliente + colonne mesi)'); return; }
+        let list = getSales(); let add=0, skip=0;
+        rows.forEach(r=>{
+          const code = iCode>-1 ? (r[iCode]||'').trim() : '';
+          const name = iName>-1 ? (r[iName]||'').trim() : '';
+          const cli = clients.find(c=> (code && c.code===code) || (!code && name && (c.name||'').toLowerCase()===name.toLowerCase()));
+          if(!cli){ skip++; return; }
+          idxs.forEach((ix,mm)=>{
+            if(ix<0) return;
+            const amount = normalizeAmount(r[ix]||'0');
+            const month = `${year}-${String(mm+1).padStart(2,'0')}`;
+            // replace
+            list = list.filter(x=> !(x.clientId===cli.id && x.month===month) );
+            list.push({clientId:cli.id, month, amount});
+            add++;
+          });
+        });
+        setSales(list);
+        alert(`Import annuale: ${add} mesi importati, ${skip} righe cliente non trovate`);
+      }
+      renderFatturati(document.getElementById('view'));
+    });
+  }
+
+  // ===== settimanale + grafici (invariati)
+  let sortW = lsGet('fattSortW',{key:'amount',dir:'desc'});
   function paintWeekly(){
     const y=+document.getElementById('wYear').value, w=+document.getElementById('wWeek').value;
     const prevY=(w===1)?(y-1):y, prevW=(w===1)?52:(w-1);
     const rows = clients.map(c=>{
-      const a=weekAmt(c.id,y,w), p=weekAmt(c.id,prevY,prevW);
-      return {name:c.name, amount:a, deltaW:a-p};
+      const a=(salesW.find(x=>x.clientId===c.id&&x.year===y&&x.week===w)||{}).amount||0;
+      const p=(salesW.find(x=>x.clientId===c.id&&x.year===prevY&&x.week===prevW)||{}).amount||0;
+      return {name:c.name, amount:Number(a||0), deltaW:Number(a||0)-Number(p||0)};
     }).sort((A,B)=>{ const k=sortW.key,d=sortW.dir; if(k==='name')return _cmp(A.name.toLowerCase(),B.name.toLowerCase(),d); if(k==='amount')return _cmp(A.amount,B.amount,d); if(k==='deltaW')return _cmp(A.deltaW,B.deltaW,d); return 0; })
       .map(r=>{
         const cls=r.deltaW<0?'text-red-600':(r.deltaW>0?'text-emerald-600':'');
@@ -1071,65 +1208,51 @@ function renderFatturati(root){
     document.getElementById('rowsW').innerHTML = rows;
     document.querySelectorAll('[data-sortw]').forEach(th=>th.onclick=()=>{ const key=th.getAttribute('data-sortw'); const dir=(sortW.key===key&&sortW.dir==='asc')?'desc':'asc'; sortW={key,dir}; lsSet('fattSortW',sortW); paintWeekly(); });
   }
-
   function paintCharts(){
-    // Totale 12 mesi
-    const months=[]; const now=new Date();
-    for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); months.push(d.toISOString().slice(0,7)); }
-    const totals=months.map(m=> sales.filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
-    _draw('chartTot', months, totals);
-    // Client YTD
+    const monthsKeys=[]; const now=new Date();
+    for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); monthsKeys.push(d.toISOString().slice(0,7)); }
+    const totals=monthsKeys.map(m=> sales.filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
+    drawLine('chartTot', monthsKeys, totals);
     const id=document.getElementById('selClient').value, Y=+document.getElementById('yearYTD').value;
     const labs=[...Array(12)].map((_,i)=>`${Y}-${String(i+1).padStart(2,'0')}`);
     const ser=labs.map(m=> sales.filter(s=>s.clientId===id && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
-    _draw('chartClient', labs, ser);
+    drawLine('chartClient', labs, ser);
   }
 
-  // init
-  paintMonthly(); paintYearly(); paintWeekly(); paintCharts();
+  // ===== listeners top
+  document.getElementById('btnImport').addEventListener('click', toggleImport);
+  const fImp = document.getElementById('fImport');
+  if(fImp) fImp.addEventListener('submit', doImportHandler);
 
-  // listeners
-  document.getElementById('mYear').addEventListener('change', paintMonthly);
-  document.getElementById('mMonth').addEventListener('change', paintMonthly);
-  document.getElementById('yYear').addEventListener('change', paintYearly);
+  document.getElementById('btnExport').addEventListener('click', exportCurrentCSV);
+  document.getElementById('btnPrint').addEventListener('click', printMain);
+
+  selMode.addEventListener('change', ()=>{
+    mode = selMode.value;
+    lsSet('fattMode', mode);
+    // default sort per modalità
+    sortState = (mode==='year')
+      ? { key:'amountY', dir:'desc' }
+      : { key:'amount',  dir:'desc' };
+    lsSet('fattSortUnified', sortState);
+    selMonth.classList.toggle('hidden', mode!=='month');
+    paintMain();
+  });
+  selYear.addEventListener('change', paintMain);
+  selMonth.addEventListener('change', paintMain);
+
+  // init
+  paintMain();
+  paintWeekly();
+  paintCharts();
+
+  // altri listeners
   document.getElementById('wYear').addEventListener('change', paintWeekly);
   document.getElementById('wWeek').addEventListener('change', paintWeekly);
   document.getElementById('selClient').addEventListener('change', paintCharts);
   document.getElementById('yearYTD').addEventListener('change', paintCharts);
-
-  // export CSV cliente×mese
-  document.getElementById('exportCSV').addEventListener('click', ()=>{
-    const rows=[['client_code','client_name','month','amount']];
-    const mapName=Object.fromEntries(clients.map(c=>[c.id,c.name]));
-    const mapCode=Object.fromEntries(clients.map(c=>[c.id,c.code||'']));
-    sales.forEach(s=> rows.push([mapCode[s.clientId]||'', mapName[s.clientId]||'', s.month, String(s.amount||0)]));
-    const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace(/"/g,'""')+'"'):v).join(',')).join('\r\n');
-    const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clienti_mese.csv'; a.click();
-  });
-
-  // export CSV annuo
-  document.getElementById('exportCSVY').addEventListener('click', ()=>{
-    const Y=+document.getElementById('yYear').value;
-    const rows=[['client_code','client_name','year','amount','annual_goal','delta_vs_goal','delta_yoy']];
-    const mapName=Object.fromEntries(clients.map(c=>[c.id,c.name]));
-    const mapCode=Object.fromEntries(clients.map(c=>[c.id,c.code||'']));
-    clients.forEach(c=>{ const t=yearlyTotals(c,Y); rows.push([mapCode[c.id]||'', mapName[c.id]||'', String(Y), String(t.amountY||0), String(t.goalY||0), String(t.deltaYG||0), String(t.deltaYoY||0)]); });
-    const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace(/"/g,'""')+'"'):v).join(',')).join('\r\n');
-    const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='fatturato_annuale_'+Y+'.csv'; a.click();
-  });
-
-  // stampa/PDF annuale
-  document.getElementById('printY').addEventListener('click', ()=>{
-    const node=document.getElementById('cardY'); const w=window.open('','_blank');
-    w.document.write(`<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Riepilogo annuale</title>
-      <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;color:#0f172a}
-      h1{font-size:18px;margin:0 0 12px}table{width:100%;border-collapse:collapse;font-size:12px}
-      th,td{border:1px solid #e2e8f0;padding:6px 8px;text-align:right}th{text-align:left;background:#f1f5f9;color:#475569}
-      td:first-child,th:first-child{text-align:left}</style></head><body>
-      <h1>Riepilogo annuale</h1>${node.querySelector('table')?.outerHTML || node.innerHTML}</body></html>`);
-    w.document.close(); w.focus(); w.print();
-  });
 }
+
 
     // ——— Agenda (con editTour annidata) ———
 function renderAgenda(root){
