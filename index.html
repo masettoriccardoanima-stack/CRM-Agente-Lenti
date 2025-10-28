@@ -113,10 +113,18 @@ async function ensureFirebaseConnected(){
 
 
     // ——— Seeds ———
-    const DEFAULT_SETTINGS={agencyName:'Marinelli Optodinamica – Agente',agentName:'Agente Demo',baseCity:'Padova',freqStandard:90,freqImportant:30,freqNew:21, annualGoal:130000};
+    const DEF_SETTINGS = {
+      agencyName:'Marinelli Optodinamica – Agente',
+      agentName:'Agente Demo',
+      baseCity:'Padova',
+      freqStandard:90,
+      freqImportant:30,
+      freqNew:21,
+      annualGoal:130000
+    };
     const TRIVENETO={ 'Veneto':['PD','VE','TV','VI','VR','RO','BL'], 'Trentino-Alto Adige/Südtirol':['TN','BZ'], 'Friuli Venezia Giulia':['TS','GO','PN','UD'] };
     function ensureSeeds(){
-      if(!lsGet('settings')) lsSet('settings',DEFAULT_SETTINGS);
+      if(!lsGet('settings')) lsSet('settings', DEF_SETTINGS);
       if(!lsGet('clients')?.length) lsSet('clients',[
         {id:'C-001',code:'OTT-PD',name:'Ottica Prato della Valle',contact:'Giulia',phone:'049...',email:'pd@ottica.it',address:'Prato della Valle 1, Padova',city:'Padova',prov:'PD',region:'Veneto',status:'attivo',tier:'importante',goalMonthly:3000,prepagatoRenewal:'',lastVisitDate:'',nextVisitDate:'',notes:''},
         {id:'C-002',code:'OTT-VE',name:'Ottica Rialto',contact:'Luca',phone:'041...',email:'ve@ottica.it',address:'San Polo 100, Venezia',city:'Venezia',prov:'VE',region:'Veneto',status:'lead',tier:'nuovo',goalMonthly:1500,prepagatoRenewal:'',lastVisitDate:'',nextVisitDate:'',notes:'Interessati a progressive'}
@@ -133,7 +141,7 @@ async function ensureFirebaseConnected(){
     ensureSeeds();
 
     // ——— Data accessors ———
-    const getSettings=()=>lsGet('settings',DEFAULT_SETTINGS);
+    const getSettings = () => lsGet('settings', DEF_SETTINGS);
     const setSettings=v=>lsSet('settings',v);
     const getClients=()=>lsGet('clients',[]), setClients=v=>lsSet('clients',v);
     const getVisits =()=>lsGet('visits',[]),  setVisits =v=>lsSet('visits',v);
