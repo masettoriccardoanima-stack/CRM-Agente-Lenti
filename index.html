@@ -92,6 +92,7 @@ async function ensureFirebaseConnected(){
 }
 
 // ——— Firebase helpers (global) ———
+// ——— Firebase helpers (global) ———
 function loadFirebaseCDN(){
   if(window.firebase) return Promise.resolve();
   const urls = [
@@ -115,12 +116,24 @@ async function ensureFirebaseConnected(){
   const fb = getFB();
   if(!fb.enabled || !fb.config || !fb.agentId) return false;
   await loadFirebaseCDN();
+
   if(!window._fbApp){
     window._fbApp = firebase.initializeApp(fb.config);
     window._fbAuth = firebase.auth();
     window._fbDB  = firebase.firestore();
   }
-  if(!window._fbAuth.currentUser) await window._fbAuth.signInAnonymously();
+
+  // già loggato
+  if(window._fbAuth.currentUser) return true;
+
+  // modalità scelta in Impostazioni
+  if((fb.authMode||'anon') === 'password'){
+    const pass = document.getElementById('fbPass')?.value || window._fbPassword || '';
+    if(!fb.email || !pass) return false; // non fare fallback automatico
+    await window._fbAuth.signInWithEmailAndPassword(fb.email, pass);
+  } else {
+    await window._fbAuth.signInAnonymously();
+  }
   return !!window._fbDB;
 }
 
@@ -294,48 +307,92 @@ async function ensureFirebaseConnected(){
 
     // ——— Clienti ———
     function renderClienti(root,q){
+  // stato UI persistente (toggle pannelli + sort)
+  window._uiClient = window._uiClient || {showNew:false, showImport:false};
+  const sortKeyLS='clientiSort';
+  let sortState = lsGet(sortKeyLS, {key:'name', dir:'asc'});
+  const saveSort = (s)=>{ sortState=s; lsSet(sortKeyLS,s); };
+
   let clients=getClients();
+  const s=getSettings();
+
+  const tiers=['nuovo','standard','importante'];
+
+  const norm=(x)=>String(x||'').toLowerCase();
+  const dateVal=(d)=> d ? new Date(d).getTime() : 0;
+  const cmp=(a,b,dir)=> dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0));
 
   function filtered(){
-    return clients.filter(c=>!q || JSON.stringify(c).toLowerCase().includes((q||'').toLowerCase()));
+    if(!q) return clients;
+    const qq=norm(q);
+    return clients.filter(c=> norm(JSON.stringify(c)).includes(qq) );
   }
 
   function row(c){
-    const s=getSettings();
-    const freq=tierToFreq(c.tier||'standard',s);
-    const overdue = c.lastVisitDate && new Date(addDays(c.lastVisitDate,freq)) < new Date(today());
+    const overdue = c.lastVisitDate && new Date(addDays(c.lastVisitDate, tierToFreq(c.tier||'standard',s))) < new Date(today());
+    const tierSel = '<select class="border rounded-xl px-2 py-1 text-sm" data-tier="'+c.id+'">'+
+      tiers.map(t=>'<option value="'+t+'" '+(t===(c.tier||'standard')?'selected':'')+'>'+t+'</option>').join('')+
+    '</select>';
+
     return [
       '<tr class="border-b align-top">',
-        '<td class="px-2 py-2 font-mono">', (c.code||''), '</td>',
+        '<td class="px-2 py-2 font-mono">', c.code||'', '</td>',
         '<td class="px-2 py-2">',
-          '<a href="#" data-open="',c.id,'" class="font-medium text-blue-600 hover:underline">', c.name ,'</a>',
+          '<button class="font-medium underline decoration-dotted" data-open="',c.id,'">', c.name ,'</button>',
           '<div class="text-xs text-slate-500">', (c.contact||''), '</div>',
         '</td>',
-        '<td class="px-2 py-2">', (c.city||''),' (',(c.prov||''),')</td>',
-        '<td class="px-2 py-2">',
-          '<select data-tier="',c.id,'" class="border rounded-xl px-2 py-1">',
-            ['nuovo','standard','importante'].map(t=>'<option '+(t===(c.tier||'standard')?'selected':'')+'>'+t+'</option>').join(''),
-          '</select>',
-        '</td>',
-        '<td class="px-2 py-2 ',(overdue?'text-red-600 font-semibold':''),'">', fmtDate(c.lastVisitDate)||'—','</td>',
+        '<td class="px-2 py-2">', (c.city||''), ' (', (c.prov||''), ')</td>',
+        '<td class="px-2 py-2">', tierSel ,'</td>',
+        '<td class="px-2 py-2 ', (overdue?'text-red-600 font-semibold':''), '">', fmtDate(c.lastVisitDate) ,'</td>',
         '<td class="px-2 py-2 text-right whitespace-nowrap">',
           '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
           '<button class="btn" data-notes="',c.id,'">Note</button> ',
           '<button class="btn" data-promo="',c.id,'">Promo</button> ',
           '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
         '</td>',
-      '</tr>'
+      '</tr>',
+      // dettaglio espandibile (se aperto)
+      (window._openClientId===c.id ? (
+        '<tr class="bg-slate-50"><td colspan="6" class="px-3 py-3 text-sm">'+[
+          '<div class="grid grid-cols-1 md:grid-cols-3 gap-3">',
+            '<div><div class="text-slate-500 text-xs">Indirizzo</div><div>', c.address||'—','</div></div>',
+            '<div><div class="text-slate-500 text-xs">Email</div><div>', c.email||'—','</div></div>',
+            '<div><div class="text-slate-500 text-xs">Telefono</div><div>', c.phone||'—','</div></div>',
+            '<div><div class="text-slate-500 text-xs">P.IVA</div><div>', c.piva||'—','</div></div>',
+            '<div><div class="text-slate-500 text-xs">Cod. fiscale</div><div>', c.cf||'—','</div></div>',
+            '<div><div class="text-slate-500 text-xs">Pagamento</div><div>', c.paymentDesc||'—','</div></div>',
+            '<div class="md:col-span-3"><div class="text-slate-500 text-xs">Note</div><div>', c.notes||'—','</div></div>',
+          '</div>'
+        ].join('')+'</td></tr>'
+      ):'')
     ].join('');
   }
 
   function paint(){
-    const list=filtered();
+    const list=[...filtered()];
+
+    // sorting
+    list.sort((A,B)=>{
+      const k=sortState.key, d=sortState.dir;
+      if(k==='name') return cmp(norm(A.name), norm(B.name), d);
+      if(k==='tier') return cmp(norm(A.tier||'standard'), norm(B.tier||'standard'), d);
+      if(k==='last') return cmp(dateVal(A.lastVisitDate), dateVal(B.lastVisitDate), d);
+      return 0;
+    });
+
     root.innerHTML=[
       '<div class="space-y-4">',
 
-        // — Nuovo cliente
+        // Toolbar con bottoni
+        '<div class="flex items-center justify-between">',
+          '<button id="btnNew" class="btn">+ Nuovo cliente</button>',
+          '<button id="btnImport" class="btn">⬆️ Import</button>',
+        '</div>',
+
+        // Pannello "Nuovo cliente" (toggle)
+        (window._uiClient.showNew?[
         '<div class="card"><div class="card-h"><h3 class="font-semibold">Nuovo cliente</h3></div>',
-        '<div class="card-b">',
+          '<div class="card-b">',
           '<form id="fNew" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
             '<input class="border rounded-xl px-3 py-2" name="code" placeholder="Codice">',
             '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" placeholder="Ragione sociale">',
@@ -348,143 +405,103 @@ async function ensureFirebaseConnected(){
             '<select class="border rounded-xl px-3 py-2" name="prov">',Object.values(TRIVENETO).flat().map(p=>'<option>'+p+'</option>').join(''),'</select>',
             '<select class="border rounded-xl px-3 py-2" name="region">',Object.keys(TRIVENETO).map(r=>'<option>'+r+'</option>').join(''),'</select>',
             '<select class="border rounded-xl px-3 py-2" name="status">',['lead','attivo','sospeso','perso'].map(s=>'<option>'+s+'</option>').join(''),'</select>',
-            '<select class="border rounded-xl px-3 py-2" name="tier">',['nuovo','standard','importante'].map(t=>'<option>'+t+'</option>').join(''),'</select>',
+            '<select class="border rounded-xl px-3 py-2" name="tier">',tiers.map(t=>'<option>'+t+'</option>').join(''),'</select>',
             '<input class="border rounded-xl px-3 py-2" type="number" step="0.01" name="goalMonthly" placeholder="Obiettivo € mensile">',
             '<input class="border rounded-xl px-3 py-2" type="date" name="prepagatoRenewal" placeholder="Rinnovo carnet/prepagato">',
             '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="notes" placeholder="Note cliente"></textarea></div>',
             '<div class="md:col-span-6 text-right"><button class="btn-primary">Aggiungi</button></div>',
           '</form>',
-        '</div></div>',
-
-        // — Import clienti
-        '<div class="card">',
-          '<div class="card-h"><h3 class="font-semibold">Import clienti (CSV)</h3></div>',
+          '</div></div>'
+        ].join(''):''),
+        
+        // Pannello "Import" (toggle)
+        (window._uiClient.showImport?[
+        '<div class="card"><div class="card-h"><h3 class="font-semibold">Import clienti (CSV)</h3></div>',
           '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
             '<input id="fileClients" type="file" accept=".csv,text/csv" class="md:col-span-3">',
-            '<div class="md:col-span-3 text-right">',
-              '<button id="importClients" class="btn">Importa</button>',
-            '</div>',
+            '<div class="md:col-span-3 text-right"><button id="importClients" class="btn">Importa</button></div>',
             '<div class="md:col-span-6 text-xs text-slate-500">',
-              'Riconosce intestazioni comuni: Codice Cliente, Ragione Sociale, Indirizzo, CAP, Località, Provincia, Codice Fiscale, Partita IVA, Persona di riferimento, Des. Pagamento, Cod. Listino (CF0/VIP/VPS), Des. Listino.',
+              'Intestazioni riconosciute: Codice Cliente, Ragione Sociale/Cliente, Indirizzo, Città/Località, CAP, Provincia, Codice Fiscale, Partita IVA, Persona di Riferimento, Email, Telefono, Des. Pagamento, Cod. Listino.',
             '</div>',
           '</div>',
-        '</div>',
-
-        // — Elenco clienti (colonne ridotte)
+        '</div>'
+        ].join(''):''),
+        
+        // Elenco (ordinabile)
         '<div class="card"><div class="card-h"><h3 class="font-semibold">Elenco clienti</h3></div>',
-        '<div class="card-b overflow-auto">',
-          '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-            '<th class="text-left px-2 py-2">Codice</th>',
-            '<th class="text-left px-2 py-2">Cliente</th>',
-            '<th class="text-left px-2 py-2">Località</th>',
-            '<th class="text-left px-2 py-2">Tier</th>',
-            '<th class="text-left px-2 py-2">Ult. visita</th>',
-            '<th class="px-2 py-2"></th>',
-          '</tr></thead><tbody>',
-            list.map(row).join(''),
-          '</tbody></table>',
-        '</div></div>',
-
+          '<div class="card-b overflow-auto">',
+            '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+              '<th class="text-left px-2 py-2">Codice</th>',
+              '<th class="text-left px-2 py-2 cursor-pointer" data-sort="name">Cliente</th>',
+              '<th class="text-left px-2 py-2">Località</th>',
+              '<th class="text-left px-2 py-2 cursor-pointer" data-sort="tier">Tier</th>',
+              '<th class="text-left px-2 py-2 cursor-pointer" data-sort="last">Ult. visita</th>',
+              '<th class="px-2 py-2"></th>',
+            '</tr></thead><tbody>',
+              list.map(row).join(''),
+            '</tbody></table>',
+          '</div>',
+        '</div>',
       '</div>'
     ].join('');
 
-    // — Aggiungi nuovo cliente
-    const f=root.querySelector('#fNew');
-    if(f){
-      f.addEventListener('submit',e=>{
-        e.preventDefault();
-        const data=Object.fromEntries(new FormData(f).entries());
-        const c={id:'C-'+Date.now(),...data,goalMonthly:Number(data.goalMonthly||0),lastVisitDate:'',nextVisitDate:'',notes:data.notes||''};
-        const all=[c, ...clients]; setClients(all); clients=all; paint();
-      });
-    }
+    // Toggle pulsanti
+    const bNew=root.querySelector('#btnNew');
+    const bImp=root.querySelector('#btnImport');
+    if(bNew) bNew.addEventListener('click', ()=>{ window._uiClient.showNew=!window._uiClient.showNew; paint(); });
+    if(bImp) bImp.addEventListener('click', ()=>{ window._uiClient.showImport=!window._uiClient.showImport; paint(); });
 
-    // — Azioni riga
-    root.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
-      const id=b.getAttribute('data-del');
-      if(confirm('Eliminare cliente?')){
-        clients=clients.filter(x=>x.id!==id); setClients(clients); paint();
-      }
-    }));
-    root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{
-      const id=b.getAttribute('data-qv'); registerQuickVisit(id); clients=getClients(); paint();
-    }));
-    root.querySelectorAll('[data-notes]').forEach(b=>b.addEventListener('click',()=>{
-      const id=b.getAttribute('data-notes'); const all=getClients(); const c=all.find(x=>x.id===id);
-      const n=prompt('Note cliente:', c.notes||''); if(n!=null){ c.notes=n; setClients(all); alert('Note salvate'); }
-    }));
-    // — Apri scheda cliente
-    root.querySelectorAll('[data-open]').forEach(a=>a.addEventListener('click',(e)=>{
+    // Submit nuovo cliente
+    const f=root.querySelector('#fNew');
+    if(f) f.addEventListener('submit',e=>{
       e.preventDefault();
-      window._openClientId = a.getAttribute('data-open');
-      route='cliente'; render();
-    }));
-    // — Tier inline
-    root.querySelectorAll('[data-tier]').forEach(sel=>{
-      sel.addEventListener('change', ()=>{
-        const id = sel.getAttribute('data-tier');
-        const all = getClients();
-        const cli = all.find(x=>x.id===id);
-        if(cli){
-          cli.tier = sel.value;
-          setClients(all);
-        }
-      });
+      const data=Object.fromEntries(new FormData(f).entries());
+      const c={id:'C-'+Date.now(),...data,goalMonthly:Number(data.goalMonthly||0),lastVisitDate:'',nextVisitDate:'',notes:data.notes||''};
+      const all=[c, ...clients]; setClients(all); clients=all; window._uiClient.showNew=false; paint();
     });
 
-    // — Import CSV (mappato sul tuo file)
-    const btnIC = root.querySelector('#importClients');
+    // Import CSV (stessa logica tua, già collaudata)
+    const btnIC=root.querySelector('#importClients');
     if(btnIC){
       btnIC.addEventListener('click', async ()=>{
-        const file = root.querySelector('#fileClients').files?.[0];
-        if(!file){ alert('Seleziona un CSV'); return; }
-        const text = await file.text();
+        const f = root.querySelector('#fileClients').files?.[0];
+        if(!f){ alert('Seleziona un CSV'); return; }
+        const text = await f.text();
         const lines = text.split(/\r?\n/).filter(l=>l.trim().length);
         if(!lines.length){ alert('CSV vuoto'); return; }
-
         const sep = lines[0].includes(';') ? ';' : ',';
         const header = lines[0].split(sep).map(h=>h.trim());
-
-        const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-        const Hmap = Object.fromEntries(header.map((h,i)=>[norm(h), i]));
-        const idx = (...aliases)=>{ for(const a of aliases){ const i=Hmap[norm(a)]; if(i!=null) return i; } return -1; };
-
+        const normH = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        const Hmap = Object.fromEntries(header.map((h,i)=>[normH(h), i]));
+        const idx = (...aliases)=>{ for(const a of aliases){ const i=Hmap[normH(a)]; if(i!=null) return i; } return -1; };
         const ix = {
-          code:      idx('Codice Cliente','codice'),
-          name:      idx('Ragione Sociale','cliente','nome'),
+          code:      idx('Codice Cliente','Codice'),
+          name:      idx('Ragione Sociale','Cliente'),
           address:   idx('Indirizzo'),
           cap:       idx('CAP'),
-          city:(()=>{ for(const [k,i] of Object.entries(Hmap)){ if(/^localit/.test(k)) return i; } return -1;})(),
-          prov:      idx('Provincia','prov'),
+          city:      (()=>{ for (const [k,i] of Object.entries(Hmap)){ if(/^localit/.test(k)||k==='città'||k==='citta') return i; } return -1; })(),
+          prov:      idx('Provincia'),
           cf:        idx('Codice Fiscale'),
-          piva:      idx('Partita IVA','P.IVA','Partita Iva','piva'),
-          contact:   idx('Persona di riferimento','Referente','Contatto'),
-          email:     idx('Indirizzo email','Email','mail'),
-          phone:     idx('Telefono','tel'),
+          piva:      idx('Partita IVA','P.IVA','Partita Iva'),
+          contact:   idx('Persona Di Riferimento','Referente'),
+          email:     idx('Indirizzo email','Email'),
+          phone:     idx('Telefono'),
           payDesc:   idx('Des. Pagamento','Descrizione Pagamento','Pagamento'),
           priceCode: idx('Cod. Listino','Codice Listino'),
           priceDesc: idx('Des. Listino','Descrizione Listino'),
         };
-
-        if(ix.code<0 && ix.name<0){
-          alert('CSV non riconosciuto: serve almeno "Codice Cliente" o "Ragione Sociale"'); return;
-        }
-
+        if(ix.code<0 && ix.name<0){ alert('CSV non riconosciuto: serve almeno "Codice Cliente" o "Ragione Sociale"'); return; }
         let list = getClients(); let added=0, updated=0;
-
-        for(let r=1;r<lines.length;r++){
+        for(let r=1; r<lines.length; r++){
           const cols = lines[r].split(sep);
           const code = ix.code>=0 ? (cols[ix.code]||'').trim() : '';
           const name = ix.name>=0 ? (cols[ix.name]||'').trim() : '';
           if(!code && !name) continue;
-
           let cli = list.find(x => (code && x.code===code))
                   || list.find(x => (ix.piva>=0 && (cols[ix.piva]||'').trim() && x.piva && x.piva.trim().toLowerCase()===(cols[ix.piva]||'').trim().toLowerCase()))
                   || list.find(x => (name && x.name && x.name.trim().toLowerCase()===name.toLowerCase()));
-
           const patch = {
-            code,
-            name,
+            code,name,
             address:    ix.address>=0 ? (cols[ix.address]||'').trim() : (cli?.address||''),
             cap:        ix.cap>=0 ? (cols[ix.cap]||'').trim() : (cli?.cap||''),
             city:       ix.city>=0 ? (cols[ix.city]||'').trim() : (cli?.city||''),
@@ -498,29 +515,56 @@ async function ensureFirebaseConnected(){
             priceCode:  ix.priceCode>=0 ? (cols[ix.priceCode]||'').trim() : (cli?.priceCode||''),
             priceDesc:  ix.priceDesc>=0 ? (cols[ix.priceDesc]||'').trim() : (cli?.priceDesc||''),
           };
-
           if(cli){ Object.assign(cli, patch); updated++; }
           else{
-            list.push({
-              id:'C-'+Date.now()+Math.random().toString(36).slice(2,7),
-              ...patch,
-              tier:'standard', status:'attivo', goalMonthly:0,
-              lastVisitDate:'', nextVisitDate:'', notes:''
-            });
+            list.push({ id:'C-'+Date.now()+Math.random().toString(36).slice(2,7), ...patch, tier:'standard', status:'attivo', goalMonthly:0, lastVisitDate:'', nextVisitDate:'', notes:'' });
             added++;
           }
         }
-
-        setClients(list);
+        setClients(list); clients=list;
         alert('Clienti importati: '+added+' — aggiornati: '+updated);
-        renderClienti(document.getElementById('view'), q);
+        window._uiClient.showImport=false; paint();
       });
     }
+
+    // azioni riga
+    root.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
+      const id=b.getAttribute('data-del');
+      if(confirm('Eliminare cliente?')){ clients=clients.filter(x=>x.id!==id); setClients(clients); paint(); }
+    }));
+    root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{
+      const id=b.getAttribute('data-qv'); registerQuickVisit(id); clients=getClients(); paint();
+    }));
+    root.querySelectorAll('[data-notes]').forEach(b=>b.addEventListener('click',()=>{
+      const id=b.getAttribute('data-notes'); const all=getClients(); const c=all.find(x=>x.id===id);
+      const n=prompt('Note cliente:', c.notes||''); if(n!=null){ c.notes=n; setClients(all); alert('Note salvate'); }
+    }));
+    root.querySelectorAll('[data-promo]').forEach(b=>b.addEventListener('click',()=>{
+      window._promoClientPreselect = b.getAttribute('data-promo'); route='promo'; render();
+    }));
+    
+    // apri scheda cliente in pagina dedicata
+    root.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click', ()=>{
+      const id=b.getAttribute('data-open');
+      window._openClientId = id;
+      route = 'cliente';
+      render();
+    }));
+
+    // edit tier in linea
+    root.querySelectorAll('[data-tier]').forEach(sel=>sel.addEventListener('change',()=>{
+      const id=sel.getAttribute('data-tier'); const all=getClients(); const c=all.find(x=>x.id===id); if(c){ c.tier=sel.value; setClients(all); }
+    }));
+    // sort intestazioni
+    root.querySelectorAll('[data-sort]').forEach(th=>th.addEventListener('click',()=>{
+      const key=th.getAttribute('data-sort');
+      const dir=(sortState.key===key && sortState.dir==='asc')?'desc':'asc';
+      saveSort({key,dir}); paint();
+    }));
   }
 
   paint();
 }
-
 
   function renderCliente(root, id){
   const all = getClients();
@@ -824,49 +868,43 @@ async function ensureFirebaseConnected(){
     }
     function normalizeAmount(s){ if(s==null) return 0; s=String(s).replace(/\\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
     function renderFatturati(root){
-  let sales=getSales();
-  let weekSales=getSalesW();
-  const clients=getClients();
-  const monthDefault=yyyymm();
+  let sales = getSales();
+  let weekSales = getSalesW();
+  const clients = getClients();
 
-  // ——— Stato ordinamento (persistito) ———
-  const sortStateKey='fattSort';
-  const defaultSort={key:'amount', dir:'desc'}; // di default ordina per fatturato discendente
-  let sortState=lsGet(sortStateKey, defaultSort);
-  function saveSort(s){ sortState=s; lsSet(sortStateKey, s); }
+  const anni = (()=>{ const y=new Date().getFullYear(); return [y,y-1,y-2,y-3].sort((a,b)=>a-b); })();
+  const mesi = [['01','Gennaio'],['02','Febbraio'],['03','Marzo'],['04','Aprile'],['05','Maggio'],['06','Giugno'],['07','Luglio'],['08','Agosto'],['09','Settembre'],['10','Ottobre'],['11','Novembre'],['12','Dicembre']];
+  const monthDefault = yyyymm(), defYear = Number(monthDefault.slice(0,4)), defMonth = monthDefault.slice(5);
 
-  // ——— Helpers ———
-  function cmp(a,b,dir){ return dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0)); }
-  function rowMonthlyData(c, m){
-    const goal=Number(c.goalMonthly||0);
-    const cur=sales.filter(s=>s.clientId===c.id && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0);
-    const [y,mm]=m.split('-').map(Number);
-    const prev=(mm===1?(y-1):y)+'-'+String(mm===1?12:mm-1).padStart(2,'0');
-    const yoy=(y-1)+'-'+String(mm).padStart(2,'0');
-    const prv=sales.filter(s=>s.clientId===c.id && s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
-    const yv =sales.filter(s=>s.clientId===c.id && s.month===yoy ).reduce((a,b)=>a+Number(b.amount||0),0);
-    return {
-      id:c.id, code:c.code||'', name:c.name, goal,
-      amount:cur, delta:(cur-prv), deltaY:(cur-yv),
-      prev, prevYoY:yoy
-    };
+  // sort state persistito
+  let sortM = lsGet('fattSort',  {key:'amount', dir:'desc'});
+  let sortW = lsGet('fattSortW', {key:'amount', dir:'desc'});
+  const saveSortM = (s)=>{ sortM=s; lsSet('fattSort', s); };
+  const saveSortW = (s)=>{ sortW=s; lsSet('fattSortW', s); };
+  const cmp=(a,b,dir)=> dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0));
+
+  const monthKey=(y,m)=> y+'-'+m;
+  function rowMonthlyData(c, y, m){
+    const mk = monthKey(y,m);
+    const goal = Number(c.goalMonthly||0);
+    const cur  = sales.filter(s=>s.clientId===c.id && s.month===mk).reduce((a,b)=>a+Number(b.amount||0),0);
+    const prev = (m==='01') ? ((y-1)+'-12') : (y+'-'+String(Number(m)-1).padStart(2,'0'));
+    const yoy  = (y-1)+'-'+m;
+    const prv  = sales.filter(s=>s.clientId===c.id && s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
+    const yv   = sales.filter(s=>s.clientId===c.id && s.month===yoy ).reduce((a,b)=>a+Number(b.amount||0),0);
+    return { id:c.id, name:c.name, goal, amount:cur, delta:(cur-prv), deltaY:(cur-yv), prev, prevYoY:yoy };
   }
-  function weekAmount(clientId, year, week){
-    const rec = weekSales.find(w=>w.clientId===clientId && w.year===year && w.week===week);
-    return Number(rec?.amount||0);
-  }
-  function weeksAvailable(){
-    // restituisce lista ordinata di {year, week} presenti in salesW
-    const set=new Set(weekSales.map(w=>w.year+'|'+w.week));
-    return [...set].map(s=>({year:Number(s.split('|')[0]), week:Number(s.split('|')[1])}))
-                   .sort((a,b)=> a.year!==b.year ? a.year-b.year : a.week-b.week);
-  }
+  const weekAmount=(cid, Y, W)=> Number((weekSales.find(w=>w.clientId===cid && w.year===Y && w.week===W)||{}).amount||0);
   function lastAvailableWeek(){
-    const all=weeksAvailable();
-    return all.length? all[all.length-1] : {year:new Date().getFullYear(), week:1};
+    const set=new Set(weekSales.map(w=>w.year+'|'+w.week));
+    const arr=[...set].map(s=>({year:+s.split('|')[0], week:+s.split('|')[1]}))
+                      .sort((a,b)=> a.year!==b.year ? a.year-b.year : a.week-b.week);
+    return arr.length? arr[arr.length-1] : {year:defYear, week:1};
   }
+
   function drawLine(canvasId, labels, series){
-    const c=document.getElementById(canvasId); if(!c) return; const ctx=c.getContext('2d'); const w=c.width= c.clientWidth; const h=c.height= 200;
+    const c=document.getElementById(canvasId); if(!c) return;
+    const ctx=c.getContext('2d'); const w=c.width=c.clientWidth; const h=c.height=200;
     ctx.clearRect(0,0,w,h);
     const max=Math.max(1, ...series); const pad=20; const stepX=(w-2*pad)/Math.max(1,labels.length-1);
     ctx.strokeStyle='#94a3b8'; ctx.beginPath(); ctx.moveTo(pad,h-pad); ctx.lineTo(w-pad,h-pad); ctx.stroke();
@@ -877,32 +915,31 @@ async function ensureFirebaseConnected(){
   }
 
   function paint(){
-    const month=document.getElementById('m')?document.getElementById('m').value:monthDefault;
-
-    // ====== UI ======
-    root.innerHTML=[
+    root.innerHTML = [
       '<div class="space-y-4">',
 
-        // Import CSV
+        // Import
         '<div class="card"><div class="card-h"><h3 class="font-semibold">Import CSV</h3></div>',
-          '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
-            '<select id="impType" class="border rounded-xl px-3 py-2">',
-              '<option value="monthly">Mensile (cliente,mese,importo)</option>',
-              '<option value="weekly">Settimanale (cliente,week40,week41,...)</option>',
-              '<option value="annual">Annuale YTD (cliente,gen,feb,...,dic)</option>',
-            '</select>',
-            '<input id="impYear" class="border rounded-xl px-3 py-2" type="number" placeholder="Anno (per settimanale)">',
-            '<input id="impWeeks" class="border rounded-xl px-3 py-2 md:col-span-2" placeholder="Settimane (es. 40,41,42,43)">',
-            '<input id="impFile" type="file" accept=".csv,text/csv" class="md:col-span-2">',
-            '<div class="md:col-span-6 text-right"><button id="doImport" class="btn-primary">Importa</button></div>',
-            '<div class="md:col-span-6 text-xs text-slate-500">Nota: il parser evita duplicati. Annuale YTD distribuisce i totali sui mesi (YYYY-01…12).</div>',
-          '</div>',
-        '</div>',
+        '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
+          '<select id="impType" class="border rounded-xl px-3 py-2">',
+            '<option value="monthly">Mensile (cliente,mese,importo)</option>',
+            '<option value="weekly">Settimanale (cliente,week40,week41,...)</option>',
+            '<option value="annual">Annuale YTD (cliente,gen..dic)</option>',
+          '</select>',
+          '<input id="impYear" class="border rounded-xl px-3 py-2" type="number" placeholder="Anno (per settimanale/annuale)">',
+          '<input id="impWeeks" class="border rounded-xl px-3 py-2 md:col-span-2" placeholder="Settimane (es. 40,41,42,43)">',
+          '<input id="impFile" type="file" accept=".csv,text/csv" class="md:col-span-2">',
+          '<div class="md:col-span-6 text-right"><button id="doImport" class="btn-primary">Importa</button></div>',
+          '<div class="md:col-span-6 text-xs text-slate-500">Nota: l’annuale distribuisce i totali sui mesi dell’anno selezionato.</div>',
+        '</div></div>',
 
-        // Mensile (con sorting)
+        // MENSILE
         '<div class="card"><div class="card-h">',
           '<h3 class="font-semibold">Riepilogo mese</h3>',
-          '<div class="flex items-center gap-2"><input id="m" type="month" value="',month,'" class="border rounded-xl px-3 py-2"></div>',
+          '<div class="flex items-center gap-2">',
+            '<select id="mYear" class="border rounded-xl px-3 py-2">', anni.map(y=>'<option '+(y===defYear?'selected':'')+'>'+y+'</option>').join('') ,'</select>',
+            '<select id="mMonth" class="border rounded-xl px-3 py-2">', mesi.map(([k,l])=>'<option value="'+k+'" '+(k===defMonth?'selected':'')+'>'+l+'</option>').join('') ,'</select>',
+          '</div>',
         '</div>',
         '<div class="card-b overflow-auto">',
           '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
@@ -916,23 +953,23 @@ async function ensureFirebaseConnected(){
           '<div class="mt-3 text-right"><button id="exportCSV" class="btn">⬇️ Export CSV cliente×mese</button></div>',
         '</div></div>',
 
-        // Settimanale (nuova tabella)
-        '<div class="card"><div class="card-h">',
-          '<h3 class="font-semibold">Riepilogo settimanale</h3>',
+        // SETTIMANALE
+        (function(){ const lw=lastAvailableWeek(); return [
+        '<div class="card"><div class="card-h"><h3 class="font-semibold">Riepilogo settimanale</h3>',
           '<div class="flex items-center gap-2">',
-            '<input id="yearW" class="border rounded-xl px-3 py-2" type="number" value="',(lastAvailableWeek().year||new Date().getFullYear()),'">',
-            '<input id="weekW" class="border rounded-xl px-3 py-2" type="number" value="',(lastAvailableWeek().week||1),'" min="1" max="53">',
-          '</div>',
-        '</div>',
+            '<select id="wYear" class="border rounded-xl px-3 py-2">', anni.map(y=>'<option '+(y===lw.year?'selected':'')+'>'+y+'</option>').join('') ,'</select>',
+            '<select id="wWeek" class="border rounded-xl px-3 py-2">', Array.from({length:53},(_,i)=>i+1).map(w=>'<option '+(w===lw.week?'selected':'')+'>'+w+'</option>').join('') ,'</select>',
+          '</div></div>',
         '<div class="card-b overflow-auto">',
           '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
             '<th class="text-left px-2 py-2 cursor-pointer" data-sortw="name">Cliente</th>',
             '<th class="text-right px-2 py-2 cursor-pointer" data-sortw="amount">Importo sett.</th>',
             '<th class="text-right px-2 py-2 cursor-pointer" data-sortw="deltaW">Δ vs sett. prec.</th>',
           '</tr></thead><tbody id="rowsW"></tbody></table>',
-        '</div></div>',
+        '</div></div>'
+        ].join(''); })(),
 
-        // Grafici
+        // GRAFICI
         '<div class="card"><div class="card-h"><h3 class="font-semibold">Grafico mensile (totale)</h3></div>',
           '<div class="card-b"><canvas id="chartTot" style="width:100%"></canvas></div>',
         '</div>',
@@ -940,7 +977,7 @@ async function ensureFirebaseConnected(){
           '<div class="card-b">',
             '<div class="flex items-center gap-2 mb-3">',
               '<select id="selClient" class="border rounded-xl px-3 py-2">', clients.map(c=>'<option value="'+c.id+'">'+c.name+'</option>').join('') ,'</select>',
-              '<input id="yearYTD" type="number" value="', new Date().getFullYear() ,'" class="border rounded-xl px-3 py-2" style="width:120px">',
+              '<select id="yearYTD" class="border rounded-xl px-3 py-2">', anni.map(y=>'<option '+(y===defYear?'selected':'')+'>'+y+'</option>').join('') ,'</select>',
             '</div>',
             '<canvas id="chartClient" style="width:100%"></canvas>',
           '</div>',
@@ -949,14 +986,12 @@ async function ensureFirebaseConnected(){
       '</div>'
     ].join('');
 
-    // ====== Render tabelle ======
+    // ---------- MENSILE ----------
     function paintMonthlyTable(){
-      const m=document.getElementById('m').value;
-      const data=clients.map(c=>rowMonthlyData(c,m));
-
-      // sort
-      data.sort((A,B)=>{
-        const k=sortState.key, d=sortState.dir;
+      const y = Number(document.getElementById('mYear').value);
+      const m = document.getElementById('mMonth').value;
+      const data = clients.map(c=>rowMonthlyData(c,y,m)).sort((A,B)=>{
+        const k=sortM.key, d=sortM.dir;
         if(k==='name')   return cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
         if(k==='goal')   return cmp(A.goal,   B.goal,   d);
         if(k==='amount') return cmp(A.amount, B.amount, d);
@@ -965,8 +1000,8 @@ async function ensureFirebaseConnected(){
         return 0;
       });
 
-      const rows=data.map(r=>{
-        const goal=r.goal; const val=r.amount;
+      document.getElementById('rowsM').innerHTML = data.map(r=>{
+        const goal=r.goal, val=r.amount;
         const pct=goal?Math.min(100,Math.round(100*val/goal)):null;
         const bar='<div class="w-40 h-2 bg-slate-200 rounded-full overflow-hidden"><div style="width:'+ (pct||0) +'%;height:100%" class="bg-blue-500"></div></div> ' + (pct!=null?(pct+'%'):'—');
         const sgn  = r.delta>0?'+':''; const sgnY = r.deltaY>0?'+':'';
@@ -984,36 +1019,25 @@ async function ensureFirebaseConnected(){
         ].join('');
       }).join('');
 
-      document.getElementById('rowsM').innerHTML=rows;
-
-      // attach sort handlers (intestazioni)
-      document.querySelectorAll('[data-sort]').forEach(th=>{
-        th.addEventListener('click', ()=>{
-          const key=th.getAttribute('data-sort');
-          const dir=(sortState.key===key && sortState.dir==='asc')?'desc':'asc';
-          saveSort({key,dir});
-          paintMonthlyTable();
-        });
-      });
+      document.querySelectorAll('[data-sort]').forEach(th=>th.addEventListener('click', ()=>{
+        const key=th.getAttribute('data-sort');
+        const dir=(sortM.key===key && sortM.dir==='asc')?'desc':'asc';
+        saveSortM({key,dir}); paintMonthlyTable();
+      }));
     }
 
+    // ---------- SETTIMANALE ----------
     function paintWeeklyTable(){
-      const Y=Number(document.getElementById('yearW').value||new Date().getFullYear());
-      const W=Number(document.getElementById('weekW').value||1);
+      const Y=Number(document.getElementById('wYear').value);
+      const W=Number(document.getElementById('wWeek').value);
       const prevY = (W===1)? (Y-1) : Y;
       const prevW = (W===1)? 52 : (W-1);
 
-      // costruiamo data per sorting
-      let sortW=lsGet('fattSortW', {key:'amount', dir:'desc'});
-      function saveSortW(s){ sortW=s; lsSet('fattSortW', s); }
-
-      const data=clients.map(c=>{
+      const data = clients.map(c=>{
         const amt = weekAmount(c.id,Y,W);
         const prv = weekAmount(c.id,prevY,prevW);
         return {id:c.id, name:c.name, amount:amt, deltaW:(amt-prv)};
-      });
-
-      data.sort((A,B)=>{
+      }).sort((A,B)=>{
         const k=sortW.key, d=sortW.dir;
         if(k==='name')   return cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
         if(k==='amount') return cmp(A.amount, B.amount, d);
@@ -1021,90 +1045,64 @@ async function ensureFirebaseConnected(){
         return 0;
       });
 
-      const rows=data.map(r=>{
+      document.getElementById('rowsW').innerHTML = data.map(r=>{
         const cls  = r.deltaW<0?'text-red-600':(r.deltaW>0?'text-emerald-600':'');
         const sgn  = r.deltaW>0?'+':'';
-        return [
-          '<tr class="border-b">',
-            '<td class="px-2 py-2">',r.name,'</td>',
-            '<td class="px-2 py-2 text-right">',fmtEuro(r.amount),'</td>',
-            '<td class="px-2 py-2 text-right ',cls,'">',sgn,fmtEuro(r.deltaW),'</td>',
-          '</tr>'
-        ].join('');
+        return ['<tr class="border-b">',
+          '<td class="px-2 py-2">',r.name,'</td>',
+          '<td class="px-2 py-2 text-right">',fmtEuro(r.amount),'</td>',
+          '<td class="px-2 py-2 text-right ',cls,'">',sgn,fmtEuro(r.deltaW),'</td>',
+        '</tr>'].join('');
       }).join('');
 
-      const tbody=document.getElementById('rowsW');
-      if(tbody){ tbody.innerHTML=rows; }
-
-      // attach sort handlers (settimanale)
-      document.querySelectorAll('[data-sortw]').forEach(th=>{
-        th.addEventListener('click', ()=>{
-          const key=th.getAttribute('data-sortw');
-          const dir=(sortW.key===key && sortW.dir==='asc')?'desc':'asc';
-          saveSortW({key,dir});
-          paintWeeklyTable();
-        });
-      });
+      document.querySelectorAll('[data-sortw]').forEach(th=>th.addEventListener('click', ()=>{
+        const key=th.getAttribute('data-sortw');
+        const dir=(sortW.key===key && sortW.dir==='asc')?'desc':'asc';
+        saveSortW({key,dir}); paintWeeklyTable();
+      }));
     }
 
-    // ====== Grafici ======
-    const months=[]; const now=new Date();
-    for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); const ym=d.toISOString().slice(0,7); months.push(ym); }
-    const totals=months.map(m=> getSales().filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
-    drawLine('chartTot', months, totals);
-
+    // ---------- Grafici ----------
     function paintClientChart(){
       const id=document.getElementById('selClient').value;
-      const Y=Number(document.getElementById('yearYTD').value||now.getFullYear());
-      const labs=[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>Y+'-'+String(m).padStart(2,'0'));
-      const ser=labs.map(m=> getSales().filter(s=>s.clientId===id && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0) );
+      const Y=Number(document.getElementById('yearYTD').value);
+      const labs=[...Array(12)].map((_,i)=> Y+'-'+String(i+1).padStart(2,'0'));
+      const ser=labs.map(m=> sales.filter(s=>s.clientId===id && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0) );
       drawLine('chartClient', labs, ser);
     }
+    function paintTotalChart(){
+      const months=[]; const now=new Date();
+      for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); months.push(d.toISOString().slice(0,7)); }
+      const totals=months.map(m=> sales.filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
+      drawLine('chartTot', months, totals);
+    }
 
-    // Initial paints
+    // init + handlers
     paintMonthlyTable();
     paintWeeklyTable();
     paintClientChart();
+    paintTotalChart();
 
-    // Handlers UI
-    document.getElementById('m').addEventListener('change', paintMonthlyTable);
-    document.getElementById('yearW').addEventListener('input', paintWeeklyTable);
-    document.getElementById('weekW').addEventListener('input', paintWeeklyTable);
+    document.getElementById('mYear').addEventListener('change', paintMonthlyTable);
+    document.getElementById('mMonth').addEventListener('change', paintMonthlyTable);
+    document.getElementById('wYear').addEventListener('change', paintWeeklyTable);
+    document.getElementById('wWeek').addEventListener('change', paintWeeklyTable);
     document.getElementById('selClient').addEventListener('change', paintClientChart);
-    document.getElementById('yearYTD').addEventListener('input', paintClientChart);
+    document.getElementById('yearYTD').addEventListener('change', paintClientChart);
 
-    // Export CSV (mensile)
-    document.getElementById('exportCSV').addEventListener('click', ()=>{
-      const rows=[['client_code','client_name','month','amount']];
-      const mapName=Object.fromEntries(getClients().map(c=>[c.id,c.name])); const mapCode=Object.fromEntries(getClients().map(c=>[c.id,c.code||'']));
-      getSales().forEach(s=>{ rows.push([mapCode[s.clientId]||'', mapName[s.clientId]||'', s.month, String(s.amount||0)]); });
-      const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"' + String(v).replace(/"/g,'""') + '"'):v).join(',')).join('\r\n');
-      const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clienti_mese.csv'; a.click();
-    });
-
-    // Import CSV (mensile/settimanale/annuale YTD)
+    // Import CSV (unico listener)
     document.getElementById('doImport').addEventListener('click', async ()=>{
       const file=document.getElementById('impFile').files?.[0]; if(!file){ alert('Seleziona un CSV'); return; }
       const type=document.getElementById('impType').value;
       const text=await file.text();
-
-      // parser semplice ; o ,
-      function parseCSV(text){
-        const firstLine=(text.split(/\r?\n/)[0]||'');
-        const delim = firstLine.includes(';') ? ';' : ',';
-        const rows=text.split(/\r?\n/).filter(r=>r.trim().length).map(r=>r.split(delim));
-        return {header:rows[0].map(h=>h.trim()), rows:rows.slice(1)};
-      }
       const tab=parseCSV(text);
       const h=tab.header.map(x=>x.toLowerCase());
-      const idx=(name)=> h.indexOf(name.toLowerCase());
-
+      const idx=(name)=> h.indexOf(String(name).toLowerCase());
       function matchClient(name, code){
-        if(code){ const m=getClients().find(c=>(c.code||'').toLowerCase()===String(code).toLowerCase()); if(m) return m.id; }
-        if(name){ const m=getClients().find(c=>(c.name||'').toLowerCase()===String(name).toLowerCase()); if(m) return m.id; }
+        if(code){ const m=clients.find(c=>(c.code||'').toLowerCase()===String(code).toLowerCase()); if(m) return m.id; }
+        if(name){ const m=clients.find(c=>(c.name||'').toLowerCase()===String(name).toLowerCase()); if(m) return m.id; }
         return null;
       }
-
       let changed=0;
 
       if(type==='monthly'){
@@ -1113,94 +1111,89 @@ async function ensureFirebaseConnected(){
         const im= idx('mese')>-1?idx('mese'): idx('month');
         const ia= idx('importo')>-1?idx('importo'): idx('amount');
         if(ic<0 || im<0 || ia<0){ alert('CSV mensile: servono colonne cliente, mese (YYYY-MM) e importo'); return; }
+        const list=[...sales];
         tab.rows.forEach(r=>{
-          const name=r[ic]?.trim(); const code=r[icode]?.trim(); const id=matchClient(name, code); if(!id) return;
-          const m=(r[im]||'').trim(); const amt=parseFloat(String(r[ia]||'0').replace(/\./g,'').replace(',','.'))||0;
-          if(!m) return;
-          sales=[...getSales(), {id:nextId('S'), clientId:id, month:m, amount:amt}];
-          setSales(sales); changed++;
+          const name=r[ic]?.trim(), code=r[icode]?.trim(), id=matchClient(name, code);
+          if(!id) return;
+          const m=(r[im]||'').trim(); if(!m) return;
+          const amt=normalizeAmount(r[ia]);
+          list.push({id:nextId('S'), clientId:id, month:m, amount:amt});
+          changed++;
         });
-
-      } else if(type==='weekly'){
-        const year=Number(document.getElementById('impYear').value||new Date().getFullYear());
-        const weeks=(document.getElementById('impWeeks').value||'').split(',').map(x=>Number(x.trim())).filter(Boolean);
+        sales=list; setSales(list);
+      }
+      else if(type==='weekly'){
+        const year  = Number(document.getElementById('impYear').value || new Date().getFullYear());
+        const weeks = (document.getElementById('impWeeks').value||'').split(',').map(x=>Number(x.trim())).filter(Boolean);
         if(!weeks.length){ alert('Specifica le settimane (es. 40,41,42,43)'); return; }
-        const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale')>-1?idx('ragione sociale'):0;
-        const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
 
-        let salesWLocal=[...getSalesW()];
-        let salesLocal=[...getSales()];
+        let salesWLocal=[...weekSales];
+        let salesLocal=[...sales];
         const touchedPairs=new Set();
 
         tab.rows.forEach(r=>{
-          const name=r[ic]?.trim(); const code=r[icode]?.trim(); const id=matchClient(name, code); if(!id) return;
+          const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale')>-1?idx('ragione sociale'):0;
+          const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
+          const name=r[ic]?.trim(), code=r[icode]?.trim(), id=matchClient(name, code);
+          if(!id) return;
+
           weeks.forEach(w=>{
-            let colIndex = h.findIndex(col => col.replace(/\s+/g,'').includes(String(w)));
+            const colIndex = h.findIndex(col => col.replace(/\s+/g,'').includes(String(w)));
             if(colIndex<0) return;
-            const amt=parseFloat(String(r[colIndex]||'0').replace(/\./g,'').replace(',','.'))||0;
+            const amt=normalizeAmount(r[colIndex]||0);
             const date=isoWeekStart(year, w).toISOString().slice(0,10);
-            const monthKey=date.slice(0,7);
-            const idxW = salesWLocal.findIndex(x=>x.clientId===id && x.year===year && x.week===w);
-            if(idxW>=0){ salesWLocal[idxW] = {...salesWLocal[idxW], amount:amt, dateISO:date}; }
-            else { salesWLocal.push({id:nextId('W'), clientId:id, year, week:w, dateISO:date, amount:amt}); }
-            touchedPairs.add(id+'|'+monthKey);
+            const mKey=date.slice(0,7);
+            const iW = salesWLocal.findIndex(x=>x.clientId===id && x.year===year && x.week===w);
+            if(iW>=0) salesWLocal[iW] = {...salesWLocal[iW], amount:amt, dateISO:date};
+            else      salesWLocal.push({id:nextId('W'), clientId:id, year, week:w, dateISO:date, amount:amt});
+            touchedPairs.add(id+'|'+mKey);
           });
         });
 
         touchedPairs.forEach(pair=>{
           const [cid, m] = pair.split('|');
           const sumW = salesWLocal.filter(x=>x.clientId===cid && x.dateISO.slice(0,7)===m)
-                        .reduce((a,b)=>a+Number(b.amount||0),0);
-          const idxM = salesLocal.findIndex(x=>x.clientId===cid && x.month===m && x.source==='weekly');
-          const rec = {id: idxM>=0? salesLocal[idxM].id : nextId('S'), clientId:cid, month:m, amount:sumW, source:'weekly'};
-          if(idxM>=0) salesLocal[idxM]=rec; else salesLocal.push(rec);
+                                  .reduce((a,b)=>a+Number(b.amount||0),0);
+          const iM = salesLocal.findIndex(x=>x.clientId===cid && x.month===m && x.source==='weekly');
+          const rec = {id: iM>=0? salesLocal[iM].id : nextId('S'), clientId:cid, month:m, amount:sumW, source:'weekly'};
+          if(iM>=0) salesLocal[iM]=rec; else salesLocal.push(rec);
         });
 
-        setSalesW(salesWLocal);
-        setSales(salesLocal);
         weekSales=salesWLocal; sales=salesLocal;
+        setSalesW(salesWLocal); setSales(salesLocal);
         changed=touchedPairs.size;
-
-      } else if(type==='annual'){
-        // Annuale YTD: colonne gen,feb,...,dic (o 1..12)
+      }
+      else if(type==='annual'){
         const ic= idx('cliente')>-1?idx('cliente'): idx('cliente_nome')>-1?idx('cliente_nome'): idx('ragione sociale');
         const icode= idx('codice')>-1?idx('codice'): idx('cliente_codice');
         if(ic<0 && icode<0){ alert('CSV annuale: serve almeno Cliente o Codice'); return; }
-        const monthNames=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
-        const mapIdx = monthNames.map(n=>{
-          let i=h.indexOf(n); if(i<0){ // prova con numeri "1","2",...
-            i=h.indexOf(String(monthNames.indexOf(n)+1));
-          }
-          return i;
-        });
-        const year = Number(document.getElementById('impYear').value||new Date().getFullYear());
-        if(mapIdx.every(i=>i<0)){ alert('CSV annuale: non trovo colonne mesi (gen..dic o 1..12)'); return; }
-
-        let salesLocal=[...getSales()];
+        const year = Number(document.getElementById('impYear').value || new Date().getFullYear());
+        const monthAliases = [
+          ['gen','1'],['feb','2'],['mar','3'],['apr','4'],['mag','5'],['giu','6'],
+          ['lug','7'],['ago','8'],['set','9'],['ott','10'],['nov','11'],['dic','12']
+        ];
+        let list=[...sales];
         tab.rows.forEach(r=>{
-          const name=r[ic]?.trim(); const code=r[icode]?.trim(); const id=matchClient(name, code); if(!id) return;
-          mapIdx.forEach((col,i)=>{
-            if(col<0) return;
-            const amt=parseFloat(String(r[col]||'0').replace(/\./g,'').replace(',','.'))||0;
+          const name=r[ic]?.trim(), code=r[icode]?.trim(), id=matchClient(name, code);
+          if(!id) return;
+          monthAliases.forEach(([abbr,num],i)=>{
+            const pos = h.findIndex(col => col.includes(abbr) || col===num || col===String(i+1));
+            if(pos<0) return;
+            const amt=normalizeAmount(r[pos]||0);
             const m=year+'-'+String(i+1).padStart(2,'0');
-            salesLocal.push({id:nextId('S'), clientId:id, month:m, amount:amt, source:'annual'});
+            list.push({id:nextId('S'), clientId:id, month:m, amount:amt, source:'annual'});
           });
         });
-        setSales(salesLocal); sales=salesLocal; changed++;
+        sales=list; setSales(list);
+        changed++;
       }
 
       alert('Import: aggiornati '+changed+' record');
-      // repaint viste
-      paintMonthlyTable();
-      paintWeeklyTable();
-      // aggiorna grafico totale
-      const months=[]; const now=new Date();
-      for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); const ym=d.toISOString().slice(0,7); months.push(ym); }
-      const totals=months.map(m=> getSales().filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
-      drawLine('chartTot', months, totals);
+      paintMonthlyTable(); paintWeeklyTable(); paintClientChart(); paintTotalChart();
     });
   }
 
+  // prima render
   paint();
 }
 
