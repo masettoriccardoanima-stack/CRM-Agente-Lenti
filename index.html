@@ -67,32 +67,7 @@
       return ISOweekStart;
     }
 
-    // ——— Firebase helpers (global) ———
-
-async function ensureFirebaseConnected(){
-  const fb=getFB();
-  if(!fb.enabled || !fb.config || !fb.agentId) return false;
-  await loadFirebaseCDN();
-  if(!window._fbApp){
-    window._fbApp=firebase.initializeApp(fb.config);
-    window._fbAuth=firebase.auth();
-    window._fbDB=firebase.firestore();
-  }
-  if(window._fbAuth.currentUser) return true;
-
-  if(fb.authMode==='password'){
-    // prova a usare email + password se disponibili (senza salvare su LS)
-    const pass = document.getElementById('fbPass')?.value || window._fbPassword || '';
-    if(!fb.email || !pass) return false; // manca password: non fare fallback anonimo
-    await window._fbAuth.signInWithEmailAndPassword(fb.email, pass);
-  }else{
-    await window._fbAuth.signInAnonymously();
-  }
-  return !!window._fbDB;
-}
-
-// ——— Firebase helpers (global) ———
-// ——— Firebase helpers (global) ———
+    /* ============== Firebase helpers (single, canonical) ============== */
 function loadFirebaseCDN(){
   if(window.firebase) return Promise.resolve();
   const urls = [
@@ -115,27 +90,27 @@ function loadFirebaseCDN(){
 async function ensureFirebaseConnected(){
   const fb = getFB();
   if(!fb.enabled || !fb.config || !fb.agentId) return false;
-  await loadFirebaseCDN();
 
+  await loadFirebaseCDN();
   if(!window._fbApp){
-    window._fbApp = firebase.initializeApp(fb.config);
+    window._fbApp  = firebase.initializeApp(fb.config);
     window._fbAuth = firebase.auth();
-    window._fbDB  = firebase.firestore();
+    window._fbDB   = firebase.firestore();
   }
 
-  // già loggato
   if(window._fbAuth.currentUser) return true;
 
-  // modalità scelta in Impostazioni
   if((fb.authMode||'anon') === 'password'){
     const pass = document.getElementById('fbPass')?.value || window._fbPassword || '';
-    if(!fb.email || !pass) return false; // non fare fallback automatico
+    if(!fb.email || !pass) return false; // niente fallback automatico
     await window._fbAuth.signInWithEmailAndPassword(fb.email, pass);
   } else {
     await window._fbAuth.signInAnonymously();
   }
   return !!window._fbDB;
 }
+/* ============== fine Firebase helpers ============== */
+
 
     // ——— Seeds ———
     const DEFAULT_SETTINGS={agencyName:'Marinelli Optodinamica – Agente',agentName:'Agente Demo',baseCity:'Padova',freqStandard:90,freqImportant:30,freqNew:21, annualGoal:130000};
@@ -167,14 +142,8 @@ async function ensureFirebaseConnected(){
     const getSalesW =()=>lsGet('salesW',[]),  setSalesW =v=>lsSet('salesW',v);
     const getTours  =()=>lsGet('tours',[]),   setTours  =v=>lsSet('tours',v);
     const getFB =()=>lsGet('firebase',{}),    setFB =v=>lsSet('firebase',v);
-    
-    // Catalogo promozioni = getPromos() (già esistente)
-    // Promozioni assegnate ai singoli clienti
     const getCPromos=()=>lsGet('cPromos',[]), setCPromos=v=>lsSet('cPromos',v);
-
-    // Stato sync cloud (timestamp ultimo upload/download locale)
     const getSync=()=>lsGet('sync',{lastSyncISO:''}), setSync=v=>lsSet('sync',v);
-
 
     const tierToFreq=(t,s=getSettings())=>t==='importante'?s.freqImportant:(t==='nuovo'?s.freqNew:s.freqStandard);
     const nextId=(series)=>{const y=new Date().getFullYear();const c=lsGet('counters',{});const key=series+':'+y;const num=Number(c[key]||0)+1;c[key]=num;lsSet('counters',c);return series+'-'+y+'-'+String(num).padStart(3,'0')};
@@ -182,24 +151,24 @@ async function ensureFirebaseConnected(){
     // ——— Drawer & shell ———
     function buildNav(active){
       const items=[['dashboard','Dashboard'],['clienti','Clienti'],['visite','Visite'],['promo','Promozioni'],['fatturati','Fatturati'],['agenda','Agenda'],['impostazioni','Impostazioni']];
-      return items.map(([k,l]) => '<button data-route=\"'+k+'\" class=\"w-full text-left px-3 py-2 rounded-xl text-sm '+(active===k?'bg-blue-50 text-blue-700 border border-blue-200':'hover:bg-slate-50')+'\">'+l+'</button>').join('');
+      return items.map(([k,l]) => '<button data-route="'+k+'" class="w-full text-left px-3 py-2 rounded-xl text-sm '+(active===k?'bg-blue-50 text-blue-700 border border-blue-200':'hover:bg-slate-50')+'">'+l+'</button>').join('');
     }
     function openDrawer(open){ document.getElementById('drawer').classList.toggle('open', !!open); document.getElementById('scrim').classList.toggle('show', !!open); }
 
     const app=document.getElementById('app'); let route='dashboard', query='';
-    window._openClientId = null; 
+    window._openClientId = null;
     function layout(){
       app.innerHTML=[
-        '<div class=\"min-h-screen\">',
-          '<div class=\"no-print sticky top-0 z-20 bg-white/90 backdrop-blur border-b\" style=\"padding:8px calc(16px + var(--safe-t))\">',
-            '<div class=\"max-w-7xl mx-auto flex items-center gap-3\">',
-              '<button id=\"burger\" class=\"btn\">☰</button>',
-              '<div class=\"font-semibold\">CRM Agente Lenti</div>',
-              '<div class=\"flex-1\"></div>',
-              '<input id=\"q\" placeholder=\"Cerca…\" value=\"'+(query||'')+'\" class=\"hidden md:block w-96 px-3 py-2 border rounded-xl text-sm border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500\">',
+        '<div class="min-h-screen">',
+          '<div class="no-print sticky top-0 z-20 bg-white/90 backdrop-blur border-b" style="padding:8px calc(16px + var(--safe-t))">',
+            '<div class="max-w-7xl mx-auto flex items-center gap-3">',
+              '<button id="burger" class="btn">☰</button>',
+              '<div class="font-semibold">CRM Agente Lenti</div>',
+              '<div class="flex-1"></div>',
+              '<input id="q" placeholder="Cerca…" value="'+(query||'')+'" class="hidden md:block w-96 px-3 py-2 border rounded-xl text-sm border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500">',
             '</div>',
           '</div>',
-          '<div id=\"view\" class=\"max-w-7xl mx-auto p-4 space-y-4\"></div>',
+          '<div id="view" class="max-w-7xl mx-auto p-4 space-y-4"></div>',
         '</div>'
       ].join('');
       document.getElementById('nav').innerHTML=buildNav(route);
@@ -209,17 +178,17 @@ async function ensureFirebaseConnected(){
       const q=document.getElementById('q'); if(q) q.addEventListener('input',e=>{query=e.target.value||'';render()});
     }
     function render(){
-  layout();
-  const root=document.getElementById('view');
-  if(route==='dashboard') return renderDashboard(root);
-  if(route==='clienti')   return renderClienti(root,query);
-  if(route==='visite')    return renderVisite(root);
-  if(route==='promo')     return renderPromo(root);
-  if(route==='fatturati') return renderFatturati(root);
-  if(route==='agenda')    return renderAgenda(root);
-  if(route==='impostazioni') return renderImpostazioni(root);
-  if(route==='cliente')   return renderCliente(root, window._openClientId);   // 👈 AGGIUNGI QUESTA
-}
+      layout();
+      const root=document.getElementById('view');
+      if(route==='dashboard') return renderDashboard(root);
+      if(route==='clienti')   return renderClienti(root,query);
+      if(route==='visite')    return renderVisite(root);
+      if(route==='promo')     return renderPromo(root);
+      if(route==='fatturati') return renderFatturati(root);
+      if(route==='agenda')    return renderAgenda(root);
+      if(route==='impostazioni') return renderImpostazioni(root);
+      if(route==='cliente')   return renderCliente(root, window._openClientId);
+    }
 
     // ——— Dashboard ———
     function lastSaleDateByClient(){
@@ -230,477 +199,463 @@ async function ensureFirebaseConnected(){
       return map;
     }
     function renderDashboard(root){
-  const clients=getClients(), visits=getVisits(), promoCatalog=getPromos(), sales=getSales();
-  const month=yyyymm();
+      const clients=getClients(), visits=getVisits(), promoCatalog=getPromos(), sales=getSales();
+      const month=yyyymm();
 
-  // KPI
-  const visitsMonth=visits.filter(v=>(v.date||'').startsWith(month)).length;
-  const totalMonth=sales.filter(x=>x.month===month).reduce((a,b)=>a+Number(b.amount||0),0);
+      // KPI
+      const visitsMonth=visits.filter(v=>(v.date||'').startsWith(month)).length;
+      const totalMonth=sales.filter(x=>x.month===month).reduce((a,b)=>a+Number(b.amount||0),0);
 
-  // Alert scadenze SOLO promozioni
-  const cPromos=getCPromos();
-  const alerts=[];
-  cPromos.forEach(cp=>{
-    if(cp.end){
-      const d=daysBetween(today(), cp.end);
-      if(d>=0 && d<=7){
-        const cli=clients.find(c=>c.id===cp.clientId);
-        alerts.push({t:'promo',txt:(cli?cli.name:'Cliente')+': promo "'+cp.title+'" in scadenza ('+fmtDate(cp.end)+')'});
-      }
-    }
-  });
-
-  const alertsHTML = alerts.length
-    ? '<ul class="space-y-2 text-sm">'+alerts.map(a =>
-        '<li class="flex gap-2"><span class="pill bg-amber-100 text-amber-700 border-amber-200">'+a.t+'</span><span>'+a.txt+'</span></li>'
-      ).join('')+'</ul>'
-    : '<div class="text-slate-500 text-sm">Nessun avviso</div>';
-
-  const lastSyncBadge = getSync().lastSyncISO
-    ? '<span class="pill bg-emerald-50 text-emerald-700 border-emerald-200">Cloud: '+new Date(getSync().lastSyncISO).toLocaleString('it-IT')+'</span>'
-    : '<span class="pill bg-slate-50 text-slate-600 border-slate-200">Cloud: mai</span>';
-
-  // Top 10 da visitare (logica invariata)
-  const s=getSettings();
-  const tierToFreqLocal=(t)=>t==='importante'?s.freqImportant:(t==='nuovo'?s.freqNew:s.freqStandard);
-  const dueScore = (c)=>{
-    const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate, tierToFreqLocal(c.tier||'standard')):'');
-    const daysLate = nextDefault ? Math.max(0, daysBetween(nextDefault, today())) : 9999;
-    const weight = c.tier==='importante'?2:(c.tier==='nuovo'?1.5:1);
-    return daysLate*weight;
-  };
-  const top10 = [...clients].sort((a,b)=>dueScore(b)-dueScore(a)).slice(0,10);
-
-  root.innerHTML=[
-    '<div class="grid grid-cols-1 lg:grid-cols-4 gap-4">',
-      '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Clienti</div><div class="text-3xl font-bold">',clients.length,'</div></div></div>',
-      '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Visite mese</div><div class="text-3xl font-bold">',visitsMonth,'</div></div></div>',
-      '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Fatturato mese</div><div class="text-3xl font-bold">',fmtEuro(totalMonth),'</div></div></div>',
-      '<div class="card"><div class="card-b flex items-center justify-between"><div><div class="text-slate-500 text-sm mb-2">Stato cloud</div>',lastSyncBadge,'</div><button id="quickSync" class="btn">Sync rapido</button></div></div>',
-    '</div>',
-    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">',
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Avvisi</h3></div><div class="card-b">',alertsHTML,'</div></div>',
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Top 10 da visitare</h3></div><div class="card-b">',
-        top10.length?('<ul class="text-sm space-y-2">'+top10.map(c=>'<li><span class="font-medium">'+c.name+'</span> — tier: '+(c.tier||'standard')+' · prossima: '+(c.nextVisitDate?fmtDate(c.nextVisitDate):'–')+' <button class="btn" data-qv="'+c.id+'">+ visita rapida</button></li>').join('')+'</ul>'):'<div class="text-slate-500 text-sm">—</div>',
-      '</div></div>',
-    '</div>'
-  ].join('')
-
-  // quick visit
-  root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{ registerQuickVisit(b.getAttribute('data-qv')); renderDashboard(root); }));
-
-  // quick sync
-  const qs=root.querySelector('#quickSync');
-  if(qs) qs.addEventListener('click', async ()=>{
-    const ok = await ensureFirebaseConnected();
-    if(!ok){ alert('Connettiti prima in Impostazioni → Sincronizzazione'); return; }
-    const fb=getFB();
-    const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
-    const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),
-                   sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
-    await docRef.set(payload);
-    setSync({lastSyncISO:new Date().toISOString()});
-    alert('Sync ok');
-    renderDashboard(root);
-  });
-}
-
-    // ——— Clienti ———
-    function renderClienti(root,q){
-  // stato UI persistente (toggle pannelli + sort)
-  window._uiClient = window._uiClient || {showNew:false, showImport:false};
-  const sortKeyLS='clientiSort';
-  let sortState = lsGet(sortKeyLS, {key:'name', dir:'asc'});
-  const saveSort = (s)=>{ sortState=s; lsSet(sortKeyLS,s); };
-
-  let clients=getClients();
-  const s=getSettings();
-
-  const tiers=['nuovo','standard','importante'];
-
-  const norm=(x)=>String(x||'').toLowerCase();
-  const dateVal=(d)=> d ? new Date(d).getTime() : 0;
-  const cmp=(a,b,dir)=> dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0));
-
-  function filtered(){
-    if(!q) return clients;
-    const qq=norm(q);
-    return clients.filter(c=> norm(JSON.stringify(c)).includes(qq) );
-  }
-
-  function row(c){
-  const tiers=['nuovo','standard','importante'];
-  const s=getSettings();
-  const overdue = c.lastVisitDate && new Date(addDays(c.lastVisitDate, tierToFreq(c.tier||'standard',s))) < new Date(today());
-  const tierSel = '<select class="border rounded-xl px-2 py-1 text-sm" data-tier="'+c.id+'">'+
-    tiers.map(t=>'<option value="'+t+'" '+(t===(c.tier||'standard')?'selected':'')+'>'+t+'</option>').join('')+
-  '</select>';
-
-  return [
-    '<tr class="border-b align-top">',
-      '<td class="px-2 py-2 font-mono">', c.code||'', '</td>',
-      '<td class="px-2 py-2">',
-        // CLIC SUL NOME = APRE/CHIUDI MINI RIASSUNTO
-        '<button class="font-medium underline decoration-dotted" data-open="',c.id,'">', c.name ,'</button>',
-        '<div class="text-xs text-slate-500">', (c.contact||''), '</div>',
-      '</td>',
-      '<td class="px-2 py-2">', (c.city||''), ' (', (c.prov||''), ')</td>',
-      '<td class="px-2 py-2">', tierSel ,'</td>',
-      '<td class="px-2 py-2 ', (overdue?'text-red-600 font-semibold':''), '">', fmtDate(c.lastVisitDate) ,'</td>',
-      '<td class="px-2 py-2 text-right whitespace-nowrap">',
-        '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
-        '<button class="btn" data-notes="',c.id,'">Note</button> ',
-        '<button class="btn" data-promo="',c.id,'">Promo</button> ',
-        '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
-      '</td>',
-    '</tr>',
-
-    // MINI RIASSUNTO espandibile + LINK a scheda completa
-    (window._openClientId===c.id ? (
-      '<tr class="bg-slate-50"><td colspan="6" class="px-3 py-3 text-sm">'+[
-        '<div class="grid grid-cols-1 md:grid-cols-3 gap-3">',
-          '<div><div class="text-slate-500 text-xs">Indirizzo</div><div>', c.address||'—','</div></div>',
-          '<div><div class="text-slate-500 text-xs">Email</div><div>', c.email||'—','</div></div>',
-          '<div><div class="text-slate-500 text-xs">Telefono</div><div>', c.phone||'—','</div></div>',
-          '<div><div class="text-slate-500 text-xs">Pagamento</div><div>', c.paymentDesc||'—','</div></div>',
-          '<div><div class="text-slate-500 text-xs">Listino</div><div>', (c.priceCode||'—'),' ', (c.priceDesc||''),'</div></div>',
-          '<div><div class="text-slate-500 text-xs">Note</div><div>', c.notes||'—','</div></div>',
-        '</div>',
-        '<div class="mt-3 flex items-center justify-between">',
-          '<div class="text-xs text-slate-600">Ultima visita: ',(fmtDate(c.lastVisitDate)||'—'),' · Prossima: ',(fmtDate(c.nextVisitDate)||'—'),'</div>',
-          '<div class="space-x-2">',
-            '<button class="btn" data-full="',c.id,'">Anagrafica completa →</button>',
-          '</div>',
-        '</div>'
-      ].join('')+'</td></tr>'
-    ):'')
-  ].join('');
-}
-
-
-  function paint(){
-    const list=[...filtered()];
-
-    // sorting
-    list.sort((A,B)=>{
-      const k=sortState.key, d=sortState.dir;
-      if(k==='name') return cmp(norm(A.name), norm(B.name), d);
-      if(k==='tier') return cmp(norm(A.tier||'standard'), norm(B.tier||'standard'), d);
-      if(k==='last') return cmp(dateVal(A.lastVisitDate), dateVal(B.lastVisitDate), d);
-      return 0;
-    });
-
-    root.innerHTML=[
-      '<div class="space-y-4">',
-
-        // Toolbar con bottoni
-        '<div class="flex items-center justify-between">',
-          '<button id="btnNew" class="btn">+ Nuovo cliente</button>',
-          '<button id="btnImport" class="btn">⬆️ Import</button>',
-        '</div>',
-
-        // Pannello "Nuovo cliente" (toggle)
-        (window._uiClient.showNew?[
-        '<div class="card"><div class="card-h"><h3 class="font-semibold">Nuovo cliente</h3></div>',
-          '<div class="card-b">',
-          '<form id="fNew" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
-            '<input class="border rounded-xl px-3 py-2" name="code" placeholder="Codice">',
-            '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" placeholder="Ragione sociale">',
-            '<input class="border rounded-xl px-3 py-2" name="piva" placeholder="P.IVA">',
-            '<input class="border rounded-xl px-3 py-2" name="contact" placeholder="Contatto">',
-            '<input class="border rounded-xl px-3 py-2" name="phone" placeholder="Telefono">',
-            '<input class="border rounded-xl px-3 py-2" name="email" placeholder="Email">',
-            '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="address" placeholder="Indirizzo">',
-            '<input class="border rounded-xl px-3 py-2" name="city" placeholder="Città">',
-            '<select class="border rounded-xl px-3 py-2" name="prov">',Object.values(TRIVENETO).flat().map(p=>'<option>'+p+'</option>').join(''),'</select>',
-            '<select class="border rounded-xl px-3 py-2" name="region">',Object.keys(TRIVENETO).map(r=>'<option>'+r+'</option>').join(''),'</select>',
-            '<select class="border rounded-xl px-3 py-2" name="status">',['lead','attivo','sospeso','perso'].map(s=>'<option>'+s+'</option>').join(''),'</select>',
-            '<select class="border rounded-xl px-3 py-2" name="tier">',tiers.map(t=>'<option>'+t+'</option>').join(''),'</select>',
-            '<input class="border rounded-xl px-3 py-2" type="number" step="0.01" name="goalMonthly" placeholder="Obiettivo € mensile">',
-            '<input class="border rounded-xl px-3 py-2" type="date" name="prepagatoRenewal" placeholder="Rinnovo carnet/prepagato">',
-            '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="notes" placeholder="Note cliente"></textarea></div>',
-            '<div class="md:col-span-6 text-right"><button class="btn-primary">Aggiungi</button></div>',
-          '</form>',
-          '</div></div>'
-        ].join(''):''),
-        
-        // Pannello "Import" (toggle)
-        (window._uiClient.showImport?[
-        '<div class="card"><div class="card-h"><h3 class="font-semibold">Import clienti (CSV)</h3></div>',
-          '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
-            '<input id="fileClients" type="file" accept=".csv,text/csv" class="md:col-span-3">',
-            '<div class="md:col-span-3 text-right"><button id="importClients" class="btn">Importa</button></div>',
-            '<div class="md:col-span-6 text-xs text-slate-500">',
-              'Intestazioni riconosciute: Codice Cliente, Ragione Sociale/Cliente, Indirizzo, Città/Località, CAP, Provincia, Codice Fiscale, Partita IVA, Persona di Riferimento, Email, Telefono, Des. Pagamento, Cod. Listino.',
-            '</div>',
-          '</div>',
-        '</div>'
-        ].join(''):''),
-        
-        // Elenco (ordinabile)
-        '<div class="card"><div class="card-h"><h3 class="font-semibold">Elenco clienti</h3></div>',
-          '<div class="card-b overflow-auto">',
-            '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-              '<th class="text-left px-2 py-2">Codice</th>',
-              '<th class="text-left px-2 py-2 cursor-pointer" data-sort="name">Cliente</th>',
-              '<th class="text-left px-2 py-2">Località</th>',
-              '<th class="text-left px-2 py-2 cursor-pointer" data-sort="tier">Tier</th>',
-              '<th class="text-left px-2 py-2 cursor-pointer" data-sort="last">Ult. visita</th>',
-              '<th class="px-2 py-2"></th>',
-            '</tr></thead><tbody>',
-              list.map(row).join(''),
-            '</tbody></table>',
-          '</div>',
-        '</div>',
-      '</div>'
-    ].join('');
-
-    // Toggle pulsanti
-    const bNew=root.querySelector('#btnNew');
-    const bImp=root.querySelector('#btnImport');
-    if(bNew) bNew.addEventListener('click', ()=>{ window._uiClient.showNew=!window._uiClient.showNew; paint(); });
-    if(bImp) bImp.addEventListener('click', ()=>{ window._uiClient.showImport=!window._uiClient.showImport; paint(); });
-
-    // Submit nuovo cliente
-    const f=root.querySelector('#fNew');
-    if(f) f.addEventListener('submit',e=>{
-      e.preventDefault();
-      const data=Object.fromEntries(new FormData(f).entries());
-      const c={id:'C-'+Date.now(),...data,goalMonthly:Number(data.goalMonthly||0),lastVisitDate:'',nextVisitDate:'',notes:data.notes||''};
-      const all=[c, ...clients]; setClients(all); clients=all; window._uiClient.showNew=false; paint();
-    });
-
-    // Import CSV (stessa logica tua, già collaudata)
-    const btnIC=root.querySelector('#importClients');
-    if(btnIC){
-      btnIC.addEventListener('click', async ()=>{
-        const f = root.querySelector('#fileClients').files?.[0];
-        if(!f){ alert('Seleziona un CSV'); return; }
-        const text = await f.text();
-        const lines = text.split(/\r?\n/).filter(l=>l.trim().length);
-        if(!lines.length){ alert('CSV vuoto'); return; }
-        const sep = lines[0].includes(';') ? ';' : ',';
-        const header = lines[0].split(sep).map(h=>h.trim());
-        const normH = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-        const Hmap = Object.fromEntries(header.map((h,i)=>[normH(h), i]));
-        const idx = (...aliases)=>{ for(const a of aliases){ const i=Hmap[normH(a)]; if(i!=null) return i; } return -1; };
-        const ix = {
-          code:      idx('Codice Cliente','Codice'),
-          name:      idx('Ragione Sociale','Cliente'),
-          address:   idx('Indirizzo'),
-          cap:       idx('CAP'),
-          city:      (()=>{ for (const [k,i] of Object.entries(Hmap)){ if(/^localit/.test(k)||k==='città'||k==='citta') return i; } return -1; })(),
-          prov:      idx('Provincia'),
-          cf:        idx('Codice Fiscale'),
-          piva:      idx('Partita IVA','P.IVA','Partita Iva'),
-          contact:   idx('Persona Di Riferimento','Referente'),
-          email:     idx('Indirizzo email','Email'),
-          phone:     idx('Telefono'),
-          payDesc:   idx('Des. Pagamento','Descrizione Pagamento','Pagamento'),
-          priceCode: idx('Cod. Listino','Codice Listino'),
-          priceDesc: idx('Des. Listino','Descrizione Listino'),
-        };
-        if(ix.code<0 && ix.name<0){ alert('CSV non riconosciuto: serve almeno "Codice Cliente" o "Ragione Sociale"'); return; }
-        let list = getClients(); let added=0, updated=0;
-        for(let r=1; r<lines.length; r++){
-          const cols = lines[r].split(sep);
-          const code = ix.code>=0 ? (cols[ix.code]||'').trim() : '';
-          const name = ix.name>=0 ? (cols[ix.name]||'').trim() : '';
-          if(!code && !name) continue;
-          let cli = list.find(x => (code && x.code===code))
-                  || list.find(x => (ix.piva>=0 && (cols[ix.piva]||'').trim() && x.piva && x.piva.trim().toLowerCase()===(cols[ix.piva]||'').trim().toLowerCase()))
-                  || list.find(x => (name && x.name && x.name.trim().toLowerCase()===name.toLowerCase()));
-          const patch = {
-            code,name,
-            address:    ix.address>=0 ? (cols[ix.address]||'').trim() : (cli?.address||''),
-            cap:        ix.cap>=0 ? (cols[ix.cap]||'').trim() : (cli?.cap||''),
-            city:       ix.city>=0 ? (cols[ix.city]||'').trim() : (cli?.city||''),
-            prov:       ix.prov>=0 ? (cols[ix.prov]||'').trim() : (cli?.prov||''),
-            cf:         ix.cf>=0 ? (cols[ix.cf]||'').trim() : (cli?.cf||''),
-            piva:       ix.piva>=0 ? (cols[ix.piva]||'').trim() : (cli?.piva||''),
-            contact:    ix.contact>=0 ? (cols[ix.contact]||'').trim() : (cli?.contact||''),
-            email:      ix.email>=0 ? (cols[ix.email]||'').trim() : (cli?.email||''),
-            phone:      ix.phone>=0 ? (cols[ix.phone]||'').trim() : (cli?.phone||''),
-            paymentDesc:ix.payDesc>=0 ? (cols[ix.payDesc]||'').trim() : (cli?.paymentDesc||''),
-            priceCode:  ix.priceCode>=0 ? (cols[ix.priceCode]||'').trim() : (cli?.priceCode||''),
-            priceDesc:  ix.priceDesc>=0 ? (cols[ix.priceDesc]||'').trim() : (cli?.priceDesc||''),
-          };
-          if(cli){ Object.assign(cli, patch); updated++; }
-          else{
-            list.push({ id:'C-'+Date.now()+Math.random().toString(36).slice(2,7), ...patch, tier:'standard', status:'attivo', goalMonthly:0, lastVisitDate:'', nextVisitDate:'', notes:'' });
-            added++;
+      // Alert scadenze PROMO
+      const cPromos=getCPromos();
+      const alerts=[];
+      cPromos.forEach(cp=>{
+        if(cp.end){
+          const d=daysBetween(today(), cp.end);
+          if(d>=0 && d<=7){
+            const cli=clients.find(c=>c.id===cp.clientId);
+            alerts.push({t:'promo',txt:(cli?cli.name:'Cliente')+': promo "'+cp.title+'" in scadenza ('+fmtDate(cp.end)+')'});
           }
         }
-        setClients(list); clients=list;
-        alert('Clienti importati: '+added+' — aggiornati: '+updated);
-        window._uiClient.showImport=false; paint();
+      });
+
+      const alertsHTML = alerts.length
+        ? '<ul class="space-y-2 text-sm">'+alerts.map(a =>
+            '<li class="flex gap-2"><span class="pill bg-amber-100 text-amber-700 border-amber-200">'+a.t+'</span><span>'+a.txt+'</span></li>'
+          ).join('')+'</ul>'
+        : '<div class="text-slate-500 text-sm">Nessun avviso</div>';
+
+      const lastSyncBadge = getSync().lastSyncISO
+        ? '<span class="pill bg-emerald-50 text-emerald-700 border-emerald-200">Cloud: '+new Date(getSync().lastSyncISO).toLocaleString('it-IT')+'</span>'
+        : '<span class="pill bg-slate-50 text-slate-600 border-slate-200">Cloud: mai</span>';
+
+      // Top 10 da visitare
+      const s=getSettings();
+      const tierToFreqLocal=(t)=>t==='importante'?s.freqImportant:(t==='nuovo'?s.freqNew:s.freqStandard);
+      const dueScore = (c)=>{
+        const nextDefault=c.nextVisitDate||(c.lastVisitDate?addDays(c.lastVisitDate, tierToFreqLocal(c.tier||'standard')):'');
+        const daysLate = nextDefault ? Math.max(0, daysBetween(nextDefault, today())) : 9999;
+        const weight = c.tier==='importante'?2:(c.tier==='nuovo'?1.5:1);
+        return daysLate*weight;
+      };
+      const top10 = [...clients].sort((a,b)=>dueScore(b)-dueScore(a)).slice(0,10);
+
+      root.innerHTML=[
+        '<div class="grid grid-cols-1 lg:grid-cols-4 gap-4">',
+          '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Clienti</div><div class="text-3xl font-bold">',clients.length,'</div></div></div>',
+          '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Visite mese</div><div class="text-3xl font-bold">',visitsMonth,'</div></div></div>',
+          '<div class="card"><div class="card-b"><div class="text-slate-500 text-sm">Fatturato mese</div><div class="text-3xl font-bold">',fmtEuro(totalMonth),'</div></div></div>',
+          '<div class="card"><div class="card-b flex items-center justify-between"><div><div class="text-slate-500 text-sm mb-2">Stato cloud</div>',lastSyncBadge,'</div><button id="quickSync" class="btn">Sync rapido</button></div></div>',
+        '</div>',
+        '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Avvisi</h3></div><div class="card-b">',alertsHTML,'</div></div>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Top 10 da visitare</h3></div><div class="card-b">',
+            top10.length?('<ul class="text-sm space-y-2">'+top10.map(c=>'<li><span class="font-medium">'+c.name+'</span> — tier: '+(c.tier||'standard')+' · prossima: '+(c.nextVisitDate?fmtDate(c.nextVisitDate):'–')+' <button class="btn" data-qv="'+c.id+'">+ visita rapida</button></li>').join('')+'</ul>'):'<div class="text-slate-500 text-sm">—</div>',
+          '</div></div>',
+        '</div>'
+      ].join('');
+
+      // quick visit
+      root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{ registerQuickVisit(b.getAttribute('data-qv')); renderDashboard(root); }));
+
+      // quick sync
+      const qs=root.querySelector('#quickSync');
+      if(qs) qs.addEventListener('click', async ()=>{
+        const ok = await ensureFirebaseConnected();
+        if(!ok){ alert('Connettiti prima in Impostazioni → Sincronizzazione'); return; }
+        const fb=getFB();
+        const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
+        const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),
+                       sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
+        await docRef.set(payload);
+        setSync({lastSyncISO:new Date().toISOString()});
+        alert('Sync ok');
+        renderDashboard(root);
       });
     }
 
-    // azioni riga
-    root.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
-      const id=b.getAttribute('data-del');
-      if(confirm('Eliminare cliente?')){ clients=clients.filter(x=>x.id!==id); setClients(clients); paint(); }
-    }));
-    root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{
-      const id=b.getAttribute('data-qv'); registerQuickVisit(id); clients=getClients(); paint();
-    }));
-    root.querySelectorAll('[data-notes]').forEach(b=>b.addEventListener('click',()=>{
-      const id=b.getAttribute('data-notes'); const all=getClients(); const c=all.find(x=>x.id===id);
-      const n=prompt('Note cliente:', c.notes||''); if(n!=null){ c.notes=n; setClients(all); alert('Note salvate'); }
-    }));
-    root.querySelectorAll('[data-promo]').forEach(b=>b.addEventListener('click',()=>{
-      window._promoClientPreselect = b.getAttribute('data-promo'); route='promo'; render();
-    }));
-    
-    // apri/chiudi mini riassunto
-    root.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>{
-      const id=b.getAttribute('data-open');
-      window._openClientId = (window._openClientId===id ? null : id);
-      paint();
-    }));
+    // ——— Clienti ———
+    function renderClienti(root,q){
+      window._uiClient = window._uiClient || {showNew:false, showImport:false};
+      const sortKeyLS='clientiSort';
+      let sortState = lsGet(sortKeyLS, {key:'name', dir:'asc'});
+      const saveSort = (s)=>{ sortState=s; lsSet(sortKeyLS,s); };
 
-    // vai alla scheda completa
-    root.querySelectorAll('[data-full]').forEach(b=>b.addEventListener('click',()=>{
-      window._openClientId = b.getAttribute('data-full');
-      route='cliente';
-      render();
-    }));
+      let clients=getClients();
+      const s=getSettings();
 
+      const tiers=['nuovo','standard','importante'];
 
-    // edit tier in linea
-    root.querySelectorAll('[data-tier]').forEach(sel=>sel.addEventListener('change',()=>{
-      const id=sel.getAttribute('data-tier'); const all=getClients(); const c=all.find(x=>x.id===id); if(c){ c.tier=sel.value; setClients(all); }
-    }));
-    // sort intestazioni
-    root.querySelectorAll('[data-sort]').forEach(th=>th.addEventListener('click',()=>{
-      const key=th.getAttribute('data-sort');
-      const dir=(sortState.key===key && sortState.dir==='asc')?'desc':'asc';
-      saveSort({key,dir}); paint();
-    }));
-  }
+      const norm=(x)=>String(x||'').toLowerCase();
+      const dateVal=(d)=> d ? new Date(d).getTime() : 0;
+      const cmp=(a,b,dir)=> dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0));
 
-  paint();
-}
+      function filtered(){
+        if(!q) return clients;
+        const qq=norm(q);
+        return clients.filter(c=> norm(JSON.stringify(c)).includes(qq) );
+      }
 
-  function renderCliente(root, id){
-  const all = getClients();
-  const c = all.find(x=>x.id===id);
-  if(!c){ root.innerHTML='<div class="card"><div class="card-b">Cliente non trovato</div></div>'; return; }
+      function row(c){
+        const tiers=['nuovo','standard','importante'];
+        const s=getSettings();
+        const overdue = c.lastVisitDate && new Date(addDays(c.lastVisitDate, tierToFreq(c.tier||'standard',s))) < new Date(today());
+        const tierSel = '<select class="border rounded-xl px-2 py-1 text-sm" data-tier="'+c.id+'">'+
+          tiers.map(t=>'<option value="'+t+'" '+(t===(c.tier||'standard')?'selected':'')+'>'+t+'</option>').join('')+
+        '</select>';
 
-  const provOpts = Object.values(TRIVENETO).flat()
-    .map(p=>'<option value="'+p+'" '+(p===(c.prov||'')?'selected':'')+'>'+p+'</option>').join('');
+        return [
+          '<tr class="border-b align-top">',
+            '<td class="px-2 py-2 font-mono">', c.code||'', '</td>',
+            '<td class="px-2 py-2">',
+              '<button class="font-medium underline decoration-dotted" data-open="',c.id,'">', c.name ,'</button>',
+              '<div class="text-xs text-slate-500">', (c.contact||''), '</div>',
+            '</td>',
+            '<td class="px-2 py-2">', (c.city||''), ' (', (c.prov||''), ')</td>',
+            '<td class="px-2 py-2">', tierSel ,'</td>',
+            '<td class="px-2 py-2 ', (overdue?'text-red-600 font-semibold':''), '">', fmtDate(c.lastVisitDate) ,'</td>',
+            '<td class="px-2 py-2 text-right whitespace-nowrap">',
+              '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
+              '<button class="btn" data-notes="',c.id,'">Note</button> ',
+              '<button class="btn" data-promo="',c.id,'">Promo</button> ',
+              '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
+            '</td>',
+          '</tr>',
 
-  root.innerHTML = [
-    '<div class="space-y-4">',
-      '<div class="card"><div class="card-h">',
-        '<h3 class="font-semibold">Scheda cliente</h3>',
-        '<div><button id="back" class="btn">← Indietro</button></div>',
-      '</div>',
-      '<div class="card-b">',
-        '<form id="fCli" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
-          '<input class="border rounded-xl px-3 py-2" name="code" value="'+(c.code||'')+'" placeholder="Codice">',
-          '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" value="'+(c.name||'')+'" placeholder="Ragione sociale">',
-          '<input class="border rounded-xl px-3 py-2" name="piva" value="'+(c.piva||'')+'" placeholder="Partita IVA">',
-          '<input class="border rounded-xl px-3 py-2" name="cf" value="'+(c.cf||'')+'" placeholder="Codice Fiscale">',
-          '<input class="border rounded-xl px-3 py-2" name="contact" value="'+(c.contact||'')+'" placeholder="Persona di riferimento">',
-          '<input class="border rounded-xl px-3 py-2" name="phone" value="'+(c.phone||'')+'" placeholder="Telefono">',
-          '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="email" value="'+(c.email||'')+'" placeholder="Email">',
-          '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="address" value="'+(c.address||'')+'" placeholder="Indirizzo">',
-          '<input class="border rounded-xl px-3 py-2" name="cap" value="'+(c.cap||'')+'" placeholder="CAP">',
-          '<input class="border rounded-xl px-3 py-2" name="city" value="'+(c.city||'')+'" placeholder="Località">',
-          '<select class="border rounded-xl px-3 py-2" name="prov">'+provOpts+'</select>',
-          '<input class="border rounded-xl px-3 py-2" name="region" value="'+(c.region||'')+'" placeholder="Regione">',
-          '<select class="border rounded-xl px-3 py-2" name="status">'+['lead','attivo','sospeso','perso'].map(s=>'<option '+(s===(c.status||'attivo')?'selected':'')+'>'+s+'</option>').join('')+'</select>',
-          '<select class="border rounded-xl px-3 py-2" name="tier">'+['nuovo','standard','importante'].map(t=>'<option '+(t===(c.tier||'standard')?'selected':'')+'>'+t+'</option>').join('')+'</select>',
-          '<input class="border rounded-xl px-3 py-2" type="number" step="0.01" name="goalMonthly" value="'+(c.goalMonthly||0)+'" placeholder="Obiettivo € mensile">',
-          // Listino (solo informativo, con datalist comodo)
-          '<input class="border rounded-xl px-3 py-2" name="paymentDesc" value="'+(c.paymentDesc||'')+'" placeholder="Des. pagamento">',
-          '<input class="border rounded-xl px-3 py-2" list="listini" name="priceCode" value="'+(c.priceCode||'')+'" placeholder="Codice listino (CF0, VIP, VPS)">',
-          '<datalist id="listini"><option value="CF0"><option value="VIP"><option value="VPS"></datalist>',
-          '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="priceDesc" value="'+(c.priceDesc||'')+'" placeholder="Descrizione listino (opz.)">',
-          '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="notes" placeholder="Note">'+(c.notes||'')+'</textarea></div>',
-          '<div class="md:col-span-6 flex items-center justify-between">',
-            '<div class="text-xs text-slate-600">Ultima visita: '+(fmtDate(c.lastVisitDate)||'—')+' · Prossima: '+(fmtDate(c.nextVisitDate)||'—')+'</div>',
-            '<div class="space-x-2">',
-              '<button type="button" id="quickVisit" class="btn">+ Visita rapida</button>',
-              '<button type="button" id="del" class="btn text-red-600 border-red-300 hover:bg-red-50">Elimina</button>',
-              '<button class="btn-primary">Salva</button>',
+          (window._openClientId===c.id ? (
+            '<tr class="bg-slate-50"><td colspan="6" class="px-3 py-3 text-sm">'+[
+              '<div class="grid grid-cols-1 md:grid-cols-3 gap-3">',
+                '<div><div class="text-slate-500 text-xs">Indirizzo</div><div>', c.address||'—','</div></div>',
+                '<div><div class="text-slate-500 text-xs">Email</div><div>', c.email||'—','</div></div>',
+                '<div><div class="text-slate-500 text-xs">Telefono</div><div>', c.phone||'—','</div></div>',
+                '<div><div class="text-slate-500 text-xs">Pagamento</div><div>', c.paymentDesc||'—','</div></div>',
+                '<div><div class="text-slate-500 text-xs">Listino</div><div>', (c.priceCode||'—'),' ', (c.priceDesc||''),'</div></div>',
+                '<div><div class="text-slate-500 text-xs">Note</div><div>', c.notes||'—','</div></div>',
+              '</div>',
+              '<div class="mt-3 flex items-center justify-between">',
+                '<div class="text-xs text-slate-600">Ultima visita: ',(fmtDate(c.lastVisitDate)||'—'),' · Prossima: ',(fmtDate(c.nextVisitDate)||'—'),'</div>',
+                '<div class="space-x-2">',
+                  '<button class="btn" data-full="',c.id,'">Anagrafica completa →</button>',
+                '</div>',
+              '</div>'
+            ].join('')+'</td></tr>'
+          ):'')
+        ].join('');
+      }
+
+      function paint(){
+        const list=[...filtered()];
+
+        // sorting
+        list.sort((A,B)=>{
+          const k=sortState.key, d=sortState.dir;
+          if(k==='name') return cmp(norm(A.name), norm(B.name), d);
+          if(k==='tier') return cmp(norm(A.tier||'standard'), norm(B.tier||'standard'), d);
+          if(k==='last') return cmp(dateVal(A.lastVisitDate), dateVal(B.lastVisitDate), d);
+          return 0;
+        });
+
+        root.innerHTML=[
+          '<div class="space-y-4">',
+
+            '<div class="flex items-center justify-between">',
+              '<button id="btnNew" class="btn">+ Nuovo cliente</button>',
+              '<button id="btnImport" class="btn">⬆️ Import</button>',
             '</div>',
-          '</div>',
-        '</form>',
-      '</div></div>',
-    '</div>'
-  ].join('');
 
-  // back
-  document.getElementById('back').addEventListener('click', ()=>{ route='clienti'; render(); });
+            (window._uiClient.showNew?[
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Nuovo cliente</h3></div>',
+              '<div class="card-b">',
+              '<form id="fNew" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+                '<input class="border rounded-xl px-3 py-2" name="code" placeholder="Codice">',
+                '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" placeholder="Ragione sociale">',
+                '<input class="border rounded-xl px-3 py-2" name="piva" placeholder="P.IVA">',
+                '<input class="border rounded-xl px-3 py-2" name="contact" placeholder="Contatto">',
+                '<input class="border rounded-xl px-3 py-2" name="phone" placeholder="Telefono">',
+                '<input class="border rounded-xl px-3 py-2" name="email" placeholder="Email">',
+                '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="address" placeholder="Indirizzo">',
+                '<input class="border rounded-xl px-3 py-2" name="city" placeholder="Città">',
+                '<select class="border rounded-xl px-3 py-2" name="prov">',Object.values(TRIVENETO).flat().map(p=>'<option>'+p+'</option>').join(''),'</select>',
+                '<select class="border rounded-xl px-3 py-2" name="region">',Object.keys(TRIVENETO).map(r=>'<option>'+r+'</option>').join(''),'</select>',
+                '<select class="border rounded-xl px-3 py-2" name="status">',['lead','attivo','sospeso','perso'].map(s=>'<option>'+s+'</option>').join(''),'</select>',
+                '<select class="border rounded-xl px-3 py-2" name="tier">',tiers.map(t=>'<option>'+t+'</option>').join(''),'</select>',
+                '<input class="border rounded-xl px-3 py-2" type="number" step="0.01" name="goalMonthly" placeholder="Obiettivo € mensile">',
+                '<input class="border rounded-xl px-3 py-2" type="date" name="prepagatoRenewal" placeholder="Rinnovo carnet/prepagato">',
+                '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="notes" placeholder="Note cliente"></textarea></div>',
+                '<div class="md:col-span-6 text-right"><button class="btn-primary">Aggiungi</button></div>',
+              '</form>',
+              '</div></div>'
+            ].join(''):''),
+            
+            (window._uiClient.showImport?[
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Import clienti (CSV)</h3></div>',
+              '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
+                '<input id="fileClients" type="file" accept=".csv,text/csv" class="md:col-span-3">',
+                '<div class="md:col-span-3 text-right"><button id="importClients" class="btn">Importa</button></div>',
+                '<div class="md:col-span-6 text-xs text-slate-500">',
+                  'Intestazioni riconosciute: Codice Cliente, Ragione Sociale/Cliente, Indirizzo, Città/Località, CAP, Provincia, Codice Fiscale, Partita IVA, Persona di Riferimento, Email, Telefono, Des. Pagamento, Cod. Listino.',
+                '</div>',
+              '</div>',
+            '</div>'
+            ].join(''):''),
+            
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Elenco clienti</h3></div>',
+              '<div class="card-b overflow-auto">',
+                '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+                  '<th class="text-left px-2 py-2">Codice</th>',
+                  '<th class="text-left px-2 py-2 cursor-pointer" data-sort="name">Cliente</th>',
+                  '<th class="text-left px-2 py-2">Località</th>',
+                  '<th class="text-left px-2 py-2 cursor-pointer" data-sort="tier">Tier</th>',
+                  '<th class="text-left px-2 py-2 cursor-pointer" data-sort="last">Ult. visita</th>',
+                  '<th class="px-2 py-2"></th>',
+                '</tr></thead><tbody>',
+                  list.map(row).join(''),
+                '</tbody></table>',
+              '</div>',
+            '</div>',
+          '</div>'
+        ].join('');
 
-  // salva
-  document.getElementById('fCli').addEventListener('submit', e=>{
-    e.preventDefault();
-    const form = Object.fromEntries(new FormData(e.target).entries());
-    Object.assign(c, {
-      code:form.code, name:form.name, piva:form.piva, cf:form.cf,
-      contact:form.contact, phone:form.phone, email:form.email,
-      address:form.address, cap:form.cap, city:form.city, prov:form.prov, region:form.region,
-      status:form.status, tier:form.tier, goalMonthly:Number(form.goalMonthly||0),
-      paymentDesc:form.paymentDesc, priceCode:form.priceCode, priceDesc:form.priceDesc,
-      notes:form.notes
-    });
-    setClients(all);
-    alert('Cliente salvato');
-  });
+        // Toggle
+        const bNew=root.querySelector('#btnNew');
+        const bImp=root.querySelector('#btnImport');
+        if(bNew) bNew.addEventListener('click', ()=>{ window._uiClient.showNew=!window._uiClient.showNew; paint(); });
+        if(bImp) bImp.addEventListener('click', ()=>{ window._uiClient.showImport=!window._uiClient.showImport; paint(); });
 
-  // visita rapida
-  document.getElementById('quickVisit').addEventListener('click', ()=>{
-    registerQuickVisit(c.id);
-    renderCliente(root, id); // aggiorna le date mostrate
-  });
+        // Submit nuovo
+        const f=root.querySelector('#fNew');
+        if(f) f.addEventListener('submit',e=>{
+          e.preventDefault();
+          const data=Object.fromEntries(new FormData(f).entries());
+          const c={id:'C-'+Date.now(),...data,goalMonthly:Number(data.goalMonthly||0),lastVisitDate:'',nextVisitDate:'',notes:data.notes||''};
+          const all=[c, ...clients]; setClients(all); clients=all; window._uiClient.showNew=false; paint();
+        });
 
-  // elimina
-  document.getElementById('del').addEventListener('click', ()=>{
-    if(confirm('Eliminare cliente?')){
-      setClients(all.filter(x=>x.id!==id));
-      route='clienti'; render();
+        // Import CSV
+        const btnIC=root.querySelector('#importClients');
+        if(btnIC){
+          btnIC.addEventListener('click', async ()=>{
+            const f = root.querySelector('#fileClients').files?.[0];
+            if(!f){ alert('Seleziona un CSV'); return; }
+            const text = await f.text();
+            const lines = text.split(/\r?\n/).filter(l=>l.trim().length);
+            if(!lines.length){ alert('CSV vuoto'); return; }
+            const sep = lines[0].includes(';') ? ';' : ',';
+            const header = lines[0].split(sep).map(h=>h.trim());
+            const normH = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+            const Hmap = Object.fromEntries(header.map((h,i)=>[normH(h), i]));
+            const idx = (...aliases)=>{ for(const a of aliases){ const i=Hmap[normH(a)]; if(i!=null) return i; } return -1; };
+            const ix = {
+              code:      idx('Codice Cliente','Codice'),
+              name:      idx('Ragione Sociale','Cliente'),
+              address:   idx('Indirizzo'),
+              cap:       idx('CAP'),
+              city:      (()=>{ for (const [k,i] of Object.entries(Hmap)){ if(/^localit/.test(k)||k==='città'||k==='citta') return i; } return -1; })(),
+              prov:      idx('Provincia'),
+              cf:        idx('Codice Fiscale'),
+              piva:      idx('Partita IVA','P.IVA','Partita Iva'),
+              contact:   idx('Persona Di Riferimento','Referente'),
+              email:     idx('Indirizzo email','Email'),
+              phone:     idx('Telefono'),
+              payDesc:   idx('Des. Pagamento','Descrizione Pagamento','Pagamento'),
+              priceCode: idx('Cod. Listino','Codice Listino'),
+              priceDesc: idx('Des. Listino','Descrizione Listino'),
+            };
+            if(ix.code<0 && ix.name<0){ alert('CSV non riconosciuto: serve almeno "Codice Cliente" o "Ragione Sociale"'); return; }
+            let list = getClients(); let added=0, updated=0;
+            for(let r=1; r<lines.length; r++){
+              const cols = lines[r].split(sep);
+              const code = ix.code>=0 ? (cols[ix.code]||'').trim() : '';
+              const name = ix.name>=0 ? (cols[ix.name]||'').trim() : '';
+              if(!code && !name) continue;
+              let cli = list.find(x => (code && x.code===code))
+                      || list.find(x => (ix.piva>=0 && (cols[ix.piva]||'').trim() && x.piva && x.piva.trim().toLowerCase()===(cols[ix.piva]||'').trim().toLowerCase()))
+                      || list.find(x => (name && x.name && x.name.trim().toLowerCase()===name.toLowerCase()));
+              const patch = {
+                code,name,
+                address:    ix.address>=0 ? (cols[ix.address]||'').trim() : (cli?.address||''),
+                cap:        ix.cap>=0 ? (cols[ix.cap]||'').trim() : (cli?.cap||''),
+                city:       ix.city>=0 ? (cols[ix.city]||'').trim() : (cli?.city||''),
+                prov:       ix.prov>=0 ? (cols[ix.prov]||'').trim() : (cli?.prov||''),
+                cf:         ix.cf>=0 ? (cols[ix.cf]||'').trim() : (cli?.cf||''),
+                piva:       ix.piva>=0 ? (cols[ix.piva]||'').trim() : (cli?.piva||''),
+                contact:    ix.contact>=0 ? (cols[ix.contact]||'').trim() : (cli?.contact||''),
+                email:      ix.email>=0 ? (cols[ix.email]||'').trim() : (cli?.email||''),
+                phone:      ix.phone>=0 ? (cols[ix.phone]||'').trim() : (cli?.phone||''),
+                paymentDesc:ix.payDesc>=0 ? (cols[ix.payDesc]||'').trim() : (cli?.paymentDesc||''),
+                priceCode:  ix.priceCode>=0 ? (cols[ix.priceCode]||'').trim() : (cli?.priceCode||''),
+                priceDesc:  ix.priceDesc>=0 ? (cols[ix.priceDesc]||'').trim() : (cli?.priceDesc||''),
+              };
+              if(cli){ Object.assign(cli, patch); updated++; }
+              else{
+                list.push({ id:'C-'+Date.now()+Math.random().toString(36).slice(2,7), ...patch, tier:'standard', status:'attivo', goalMonthly:0, lastVisitDate:'', nextVisitDate:'', notes:'' });
+                added++;
+              }
+            }
+            setClients(list); clients=list;
+            alert('Clienti importati: '+added+' — aggiornati: '+updated);
+            window._uiClient.showImport=false; paint();
+          });
+        }
+
+        // azioni riga
+        root.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
+          const id=b.getAttribute('data-del');
+          if(confirm('Eliminare cliente?')){ clients=clients.filter(x=>x.id!==id); setClients(clients); paint(); }
+        }));
+        root.querySelectorAll('[data-qv]').forEach(b=>b.addEventListener('click',()=>{
+          const id=b.getAttribute('data-qv'); registerQuickVisit(id); clients=getClients(); paint();
+        }));
+        root.querySelectorAll('[data-notes]').forEach(b=>b.addEventListener('click',()=>{
+          const id=b.getAttribute('data-notes'); const all=getClients(); const c=all.find(x=>x.id===id);
+          const n=prompt('Note cliente:', c.notes||''); if(n!=null){ c.notes=n; setClients(all); alert('Note salvate'); }
+        }));
+        root.querySelectorAll('[data-promo]').forEach(b=>b.addEventListener('click',()=>{
+          window._promoClientPreselect = b.getAttribute('data-promo'); route='promo'; render();
+        }));
+        
+        // apri/chiudi mini riassunto
+        root.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>{
+          const id=b.getAttribute('data-open');
+          window._openClientId = (window._openClientId===id ? null : id);
+          paint();
+        }));
+
+        // vai alla scheda completa
+        root.querySelectorAll('[data-full]').forEach(b=>b.addEventListener('click',()=>{
+          window._openClientId = b.getAttribute('data-full');
+          route='cliente';
+          render();
+        }));
+
+        // edit tier
+        root.querySelectorAll('[data-tier]').forEach(sel=>sel.addEventListener('change',()=>{
+          const id=sel.getAttribute('data-tier'); const all=getClients(); const c=all.find(x=>x.id===id); if(c){ c.tier=sel.value; setClients(all); }
+        }));
+        // sort
+        root.querySelectorAll('[data-sort]').forEach(th=>th.addEventListener('click',()=>{
+          const key=th.getAttribute('data-sort');
+          const dir=(sortState.key===key && sortState.dir==='asc')?'desc':'asc';
+          saveSort({key,dir}); paint();
+        }));
+      }
+
+      paint();
     }
-  });
-}
+
+    function renderCliente(root, id){
+      const all = getClients();
+      const c = all.find(x=>x.id===id);
+      if(!c){ root.innerHTML='<div class="card"><div class="card-b">Cliente non trovato</div></div>'; return; }
+
+      const provOpts = Object.values(TRIVENETO).flat()
+        .map(p=>'<option value="'+p+'" '+(p===(c.prov||'')?'selected':'')+'>'+p+'</option>').join('');
+
+      root.innerHTML = [
+        '<div class="space-y-4">',
+          '<div class="card"><div class="card-h">',
+            '<h3 class="font-semibold">Scheda cliente</h3>',
+            '<div><button id="back" class="btn">← Indietro</button></div>',
+          '</div>',
+          '<div class="card-b">',
+            '<form id="fCli" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+              '<input class="border rounded-xl px-3 py-2" name="code" value="'+(c.code||'')+'" placeholder="Codice">',
+              '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="name" value="'+(c.name||'')+'" placeholder="Ragione sociale">',
+              '<input class="border rounded-xl px-3 py-2" name="piva" value="'+(c.piva||'')+'" placeholder="Partita IVA">',
+              '<input class="border rounded-xl px-3 py-2" name="cf" value="'+(c.cf||'')+'" placeholder="Codice Fiscale">',
+              '<input class="border rounded-xl px-3 py-2" name="contact" value="'+(c.contact||'')+'" placeholder="Persona di riferimento">',
+              '<input class="border rounded-xl px-3 py-2" name="phone" value="'+(c.phone||'')+'" placeholder="Telefono">',
+              '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="email" value="'+(c.email||'')+'" placeholder="Email">',
+              '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="address" value="'+(c.address||'')+'" placeholder="Indirizzo">',
+              '<input class="border rounded-xl px-3 py-2" name="cap" value="'+(c.cap||'')+'" placeholder="CAP">',
+              '<input class="border rounded-xl px-3 py-2" name="city" value="'+(c.city||'')+'" placeholder="Località">',
+              '<select class="border rounded-xl px-3 py-2" name="prov">'+provOpts+'</select>',
+              '<input class="border rounded-xl px-3 py-2" name="region" value="'+(c.region||'')+'" placeholder="Regione">',
+              '<select class="border rounded-xl px-3 py-2" name="status">'+['lead','attivo','sospeso','perso'].map(s=>'<option '+(s===(c.status||'attivo')?'selected':'')+'>'+s+'</option>').join('')+'</select>',
+              '<select class="border rounded-xl px-3 py-2" name="tier">'+['nuovo','standard','importante'].map(t=>'<option '+(t===(c.tier||'standard')?'selected':'')+'>'+t+'</option>').join('')+'</select>',
+              '<input class="border rounded-xl px-3 py-2" type="number" step="0.01" name="goalMonthly" value="'+(c.goalMonthly||0)+'" placeholder="Obiettivo € mensile">',
+              '<input class="border rounded-xl px-3 py-2" name="paymentDesc" value="'+(c.paymentDesc||'')+'" placeholder="Des. pagamento">',
+              '<input class="border rounded-xl px-3 py-2" list="listini" name="priceCode" value="'+(c.priceCode||'')+'" placeholder="Codice listino (CF0, VIP, VPS)">',
+              '<datalist id="listini"><option value="CF0"><option value="VIP"><option value="VPS"></datalist>',
+              '<input class="border rounded-xl px-3 py-2 md:col-span-3" name="priceDesc" value="'+(c.priceDesc||'')+'" placeholder="Descrizione listino (opz.)">',
+              '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="notes" placeholder="Note">'+(c.notes||'')+'</textarea></div>',
+              '<div class="md:col-span-6 flex items-center justify-between">',
+                '<div class="text-xs text-slate-600">Ultima visita: '+(fmtDate(c.lastVisitDate)||'—')+' · Prossima: '+(fmtDate(c.nextVisitDate)||'—')+'</div>',
+                '<div class="space-x-2">',
+                  '<button type="button" id="quickVisit" class="btn">+ Visita rapida</button>',
+                  '<button type="button" id="del" class="btn text-red-600 border-red-300 hover:bg-red-50">Elimina</button>',
+                  '<button class="btn-primary">Salva</button>',
+                '</div>',
+              '</div>',
+            '</form>',
+          '</div></div>',
+        '</div>'
+      ].join('');
+
+      document.getElementById('back').addEventListener('click', ()=>{ route='clienti'; render(); });
+
+      document.getElementById('fCli').addEventListener('submit', e=>{
+        e.preventDefault();
+        const form = Object.fromEntries(new FormData(e.target).entries());
+        Object.assign(c, {
+          code:form.code, name:form.name, piva:form.piva, cf:form.cf,
+          contact:form.contact, phone:form.phone, email:form.email,
+          address:form.address, cap:form.cap, city:form.city, prov:form.prov, region:form.region,
+          status:form.status, tier:form.tier, goalMonthly:Number(form.goalMonthly||0),
+          paymentDesc:form.paymentDesc, priceCode:form.priceCode, priceDesc:form.priceDesc,
+          notes:form.notes
+        });
+        setClients(all);
+        alert('Cliente salvato');
+      });
+
+      document.getElementById('quickVisit').addEventListener('click', ()=>{
+        registerQuickVisit(c.id);
+        renderCliente(root, id);
+      });
+
+      document.getElementById('del').addEventListener('click', ()=>{
+        if(confirm('Eliminare cliente?')){
+          setClients(all.filter(x=>x.id!==id));
+          route='clienti'; render();
+        }
+      });
+    }
 
     // ——— Visite ———
     function renderVisite(root){
       const clients=getClients(); let visits=getVisits();
-      function rows(){ return visits.map(v => ['<tr class=\"border-b\">',
-        '<td class=\"px-2 py-2 font-mono\">',v.id,'</td>',
-        '<td class=\"px-2 py-2\">',fmtDate(v.date),'</td>',
-        '<td class=\"px-2 py-2\">',(clients.find(c=>c.id===v.clientId)||{}).name||'—','</td>',
-        '<td class=\"px-2 py-2\">',v.reason,'</td>',
-        '<td class=\"px-2 py-2\">',v.esito,'</td>',
-        '<td class=\"px-2 py-2\">',fmtDate(v.nextDate),'</td>',
-        '<td class=\"px-2 py-2\">',v.notes||'', '</td>',
-        '<td class=\"px-2 py-2 text-right\"><button class=\"btn text-red-600 border-red-300 hover:bg-red-50\" data-del=\"',v.id,'\">Elimina</button></td>',
+      function rows(){ return visits.map(v => ['<tr class="border-b">',
+        '<td class="px-2 py-2 font-mono">',v.id,'</td>',
+        '<td class="px-2 py-2">',fmtDate(v.date),'</td>',
+        '<td class="px-2 py-2">',(clients.find(c=>c.id===v.clientId)||{}).name||'—','</td>',
+        '<td class="px-2 py-2">',v.reason,'</td>',
+        '<td class="px-2 py-2">',v.esito,'</td>',
+        '<td class="px-2 py-2">',fmtDate(v.nextDate),'</td>',
+        '<td class="px-2 py-2">',v.notes||'', '</td>',
+        '<td class="px-2 py-2 text-right"><button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',v.id,'">Elimina</button></td>',
       '</tr>'].join('')).join(''); }
       root.innerHTML=[
-        '<div class=\"space-y-4\">',
-          '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Registra visita</h3></div>',
-          '<div class=\"card-b\">',
-            '<form id=\"fVisit\" class=\"grid grid-cols-1 md:grid-cols-6 gap-3\">',
-              '<input class=\"border rounded-xl px-3 py-2\" type=\"date\" name=\"date\" value=\"',today(),'\">',
-              '<select class=\"border rounded-xl px-3 py-2\" name=\"clientId\">',clients.map(c=>'<option value=\"'+c.id+'\">'+c.name+'</option>').join(''),'</select>',
-              '<select class=\"border rounded-xl px-3 py-2\" name=\"reason\">',['Presentazione','Follow-up','Listino','Promo','Reclamo','Riscossione','Altro'].map(x=>'<option>'+x+'</option>').join(''),'</select>',
-              '<select class=\"border rounded-xl px-3 py-2\" name=\"esito\">',['Positivo','Neutro','Negativo'].map(x=>'<option>'+x+'</option>').join(''),'</select>',
-              '<input class=\"border rounded-xl px-3 py-2\" type=\"date\" name=\"nextDate\" placeholder=\"Prossima\">',
+        '<div class="space-y-4">',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Registra visita</h3></div>',
+          '<div class="card-b">',
+            '<form id="fVisit" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+              '<input class="border rounded-xl px-3 py-2" type="date" name="date" value="',today(),'">',
+              '<select class="border rounded-xl px-3 py-2" name="clientId">',clients.map(c=>'<option value="'+c.id+'">'+c.name+'</option>').join(''),'</select>',
+              '<select class="border rounded-xl px-3 py-2" name="reason">',['Presentazione','Follow-up','Listino','Promo','Reclamo','Riscossione','Altro'].map(x=>'<option>'+x+'</option>').join(''),'</select>',
+              '<select class="border rounded-xl px-3 py-2" name="esito">',['Positivo','Neutro','Negativo'].map(x=>'<option>'+x+'</option>').join(''),'</select>',
+              '<input class="border rounded-xl px-3 py-2" type="date" name="nextDate" placeholder="Prossima">',
               '<div class="md:col-span-3 flex gap-2 items-center">',
                 '<input class="border rounded-xl px-3 py-2 flex-1" name="notes" placeholder="Note visita (azioni, feedback)">',
                 '<button type="button" id="dictate" class="btn">🎤 Dettatura</button>',
                 '</div>',
-              '<div class=\"md:col-span-6 text-right\"><button class=\"btn-primary\">Salva</button></div>',
+              '<div class="md:col-span-6 text-right"><button class="btn-primary">Salva</button></div>',
             '</form>',
           '</div></div>',
-          '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Storico visite</h3></div>',
-          '<div class=\"card-b overflow-auto\"><table class=\"min-w-full text-sm\"><thead class=\"bg-slate-100 text-slate-600\"><tr>',
-          '<th class=\"text-left px-2 py-2\">ID</th><th class=\"text-left px-2 py-2\">Data</th><th class=\"text-left px-2 py-2\">Cliente</th><th class=\"text-left px-2 py-2\">Motivo</th><th class=\"text-left px-2 py-2\">Esito</th><th class=\"text-left px-2 py-2\">Prossima</th><th class=\"text-left px-2 py-2\">Note</th><th class=\"px-2 py-2\"></th>',
-          '</tr></thead><tbody id=\"tbody\">',rows(),'</tbody></table></div>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Storico visite</h3></div>',
+          '<div class="card-b overflow-auto"><table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+          '<th class="text-left px-2 py-2">ID</th><th class="text-left px-2 py-2">Data</th><th class="text-left px-2 py-2">Cliente</th><th class="text-left px-2 py-2">Motivo</th><th class="text-left px-2 py-2">Esito</th><th class="text-left px-2 py-2">Prossima</th><th class="text-left px-2 py-2">Note</th><th class="px-2 py-2"></th>',
+          '</tr></thead><tbody id="tbody">',rows(),'</tbody></table></div>',
         '</div>'
       ].join('');
 
@@ -708,492 +663,483 @@ async function ensureFirebaseConnected(){
       repaint();
       const f=root.querySelector('#fVisit'); f.addEventListener('submit',e=>{e.preventDefault(); const data=Object.fromEntries(new FormData(f).entries()); const id=nextId('V'); const v={id,...data}; visits.unshift(v); setVisits(visits);
         const s=getSettings(); const all=getClients(); const c=all.find(x=>x.id===data.clientId); if(c){ const next=data.nextDate||addDays(data.date,tierToFreq(c.tier||'standard',s)); c.lastVisitDate=data.date; c.nextVisitDate=next; setClients(all); } repaint(); f.reset(); });
-      // Dettatura note (Web Speech API)
-        const btnDict = root.querySelector('#dictate');
-            if(btnDict){
-              btnDict.addEventListener('click', ()=>{
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                if(!SpeechRecognition){ alert('Dettatura non supportata su questo browser'); return; }
-                const r = new SpeechRecognition();
-                r.lang = 'it-IT'; r.interimResults = false; r.maxAlternatives = 1;
-                r.onresult = (e)=>{
-                  const txt = e.results[0][0].transcript || '';
-                  const notes = root.querySelector('input[name="notes"]');
-                  notes.value = (notes.value? (notes.value+' ') : '') + txt;
-                };
-                r.onerror = (e)=> alert('Errore dettatura: '+(e.error||''));
-                r.start();
-              });
-            }
+      // Dettatura note
+      const btnDict = root.querySelector('#dictate');
+      if(btnDict){
+        btnDict.addEventListener('click', ()=>{
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if(!SpeechRecognition){ alert('Dettatura non supportata su questo browser'); return; }
+          const r = new SpeechRecognition();
+          r.lang = 'it-IT'; r.interimResults = false; r.maxAlternatives = 1;
+          r.onresult = (e)=>{
+            const txt = e.results[0][0].transcript || '';
+            const notes = root.querySelector('input[name="notes"]');
+            notes.value = (notes.value? (notes.value+' ') : '') + txt;
+          };
+          r.onerror = (e)=> alert('Errore dettatura: '+(e.error||'')); r.start();
+        });
       }
-
+    }
 
     // ——— Promozioni ———
     function renderPromo(root){
-  let catalog=getPromos();       // catalogo promozioni (modello)
-  let cPromos=getCPromos();      // assegnazioni per cliente
-  const clients=getClients();
-  const preClient = window._promoClientPreselect || '';
+      let catalog=getPromos();
+      let cPromos=getCPromos();
+      const clients=getClients();
+      const preClient = window._promoClientPreselect || '';
 
-  function rowCatalog(p){
-    return ['<tr class="border-b align-top">',
-      '<td class="px-2 py-2"><div class="font-medium">',p.title,'</div><div class="text-xs text-slate-600">',(p.desc||''),'</div></td>',
-      '<td class="px-2 py-2">',(p.defaultDays? (p.defaultDays+' gg') : '—'),'</td>',
-      '<td class="px-2 py-2">',(p.provinces||[]).join(', ')||'—','</td>',
-      '<td class="px-2 py-2 text-right"><button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del-cat="',p.id,'">Elimina</button></td>',
-    '</tr>'].join('');
-  }
+      function rowCatalog(p){
+        return ['<tr class="border-b align-top">',
+          '<td class="px-2 py-2"><div class="font-medium">',p.title,'</div><div class="text-xs text-slate-600">',(p.desc||''),'</div></td>',
+          '<td class="px-2 py-2">',(p.defaultDays? (p.defaultDays+' gg') : '—'),'</td>',
+          '<td class="px-2 py-2">',(p.provinces||[]).join(', ')||'—','</td>',
+          '<td class="px-2 py-2 text-right"><button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del-cat="',p.id,'">Elimina</button></td>',
+        '</tr>'].join('');
+      }
 
-  function rowAct(cp){
-    const cli = clients.find(c=>c.id===cp.clientId);
-    const daysLeft = cp.end ? daysBetween(today(), cp.end) : null;
-    const badge = (daysLeft!=null)
-      ? (daysLeft<0?'<span class="pill bg-slate-100 text-slate-600 border-slate-200">scaduta</span>'
-          : (daysLeft<=7?'<span class="pill bg-amber-100 text-amber-700 border-amber-200">'+daysLeft+'g</span>'
-                        : '<span class="pill">'+daysLeft+'g</span>'))
-      : '—';
-    return ['<tr class="border-b align-top">',
-      '<td class="px-2 py-2">',cli?cli.name:'—','</td>',
-      '<td class="px-2 py-2">',cp.title,'</td>',
-      '<td class="px-2 py-2">',fmtDate(cp.start),' – ',fmtDate(cp.end),'</td>',
-      '<td class="px-2 py-2">',badge,'</td>',
-      '<td class="px-2 py-2">',cp.note||'','</td>',
-      '<td class="px-2 py-2 text-right">',
-        '<button class="btn" data-ics="',cp.id,'">ICS</button> ',
-        '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del-act="',cp.id,'">Elimina</button>',
-      '</td>',
-    '</tr>'].join('');
-  }
+      function rowAct(cp){
+        const cli = clients.find(c=>c.id===cp.clientId);
+        const daysLeft = cp.end ? daysBetween(today(), cp.end) : null;
+        const badge = (daysLeft!=null)
+          ? (daysLeft<0?'<span class="pill bg-slate-100 text-slate-600 border-slate-200">scaduta</span>'
+              : (daysLeft<=7?'<span class="pill bg-amber-100 text-amber-700 border-amber-200">'+daysLeft+'g</span>'
+                            : '<span class="pill">'+daysLeft+'g</span>'))
+          : '—';
+        return ['<tr class="border-b align-top">',
+          '<td class="px-2 py-2">',cli?cli.name:'—','</td>',
+          '<td class="px-2 py-2">',cp.title,'</td>',
+          '<td class="px-2 py-2">',fmtDate(cp.start),' – ',fmtDate(cp.end),'</td>',
+          '<td class="px-2 py-2">',badge,'</td>',
+          '<td class="px-2 py-2">',cp.note||'','</td>',
+          '<td class="px-2 py-2 text-right">',
+            '<button class="btn" data-ics="',cp.id,'">ICS</button> ',
+            '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del-act="',cp.id,'">Elimina</button>',
+          '</td>',
+        '</tr>'].join('');
+      }
 
-  root.innerHTML=[
-    '<div class="space-y-4">',
+      root.innerHTML=[
+        '<div class="space-y-4">',
 
-      // CATALOGO
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Catalogo promozioni</h3></div>',
-      '<div class="card-b">',
-        '<form id="fCat" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
-          '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="title" placeholder="Titolo promo">',
-          '<input class="border rounded-xl px-3 py-2" type="number" name="defaultDays" placeholder="Durata standard (giorni)">',
-          '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="desc" placeholder="Descrizione/condizioni"></textarea></div>',
-          '<div class="md:col-span-6"><div class="text-sm font-medium mb-2">Province consigliate</div><div class="flex flex-wrap gap-2" id="pProvs">',
-            Object.values(TRIVENETO).flat().map(p=>'<label class="px-2 py-1 border rounded-xl text-sm cursor-pointer"><input type="checkbox" value="'+p+'" class="mr-1">'+p+'</label>').join(''),
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Catalogo promozioni</h3></div>',
+          '<div class="card-b">',
+            '<form id="fCat" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+              '<input class="border rounded-xl px-3 py-2 md:col-span-2" name="title" placeholder="Titolo promo">',
+              '<input class="border rounded-xl px-3 py-2" type="number" name="defaultDays" placeholder="Durata standard (giorni)">',
+              '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="desc" placeholder="Descrizione/condizioni"></textarea></div>',
+              '<div class="md:col-span-6"><div class="text-sm font-medium mb-2">Province consigliate</div><div class="flex flex-wrap gap-2" id="pProvs">',
+                Object.values(TRIVENETO).flat().map(p=>'<label class="px-2 py-1 border rounded-xl text-sm cursor-pointer"><input type="checkbox" value="'+p+'" class="mr-1">'+p+'</label>').join(''),
+              '</div></div>',
+              '<div class="md:col-span-6 text-right"><button class="btn-primary">Aggiungi a catalogo</button></div>',
+            '</form>',
+          '</div>',
+          '<div class="card"><div class="card-b overflow-auto">',
+            '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+            '<th class="text-left px-2 py-2">Titolo</th><th class="text-left px-2 py-2">Durata std</th><th class="text-left px-2 py-2">Province</th><th class="px-2 py-2"></th>',
+            '</tr></thead><tbody id="rowsCat">', catalog.map(rowCatalog).join('') ,'</tbody></table>',
           '</div></div>',
-          '<div class="md:col-span-6 text-right"><button class="btn-primary">Aggiungi a catalogo</button></div>',
-        '</form>',
-      '</div>',
-      '<div class="card"><div class="card-b overflow-auto">',
-        '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-        '<th class="text-left px-2 py-2">Titolo</th><th class="text-left px-2 py-2">Durata std</th><th class="text-left px-2 py-2">Province</th><th class="px-2 py-2"></th>',
-        '</tr></thead><tbody id="rowsCat">', catalog.map(rowCatalog).join('') ,'</tbody></table>',
-      '</div></div>',
 
-      // ATTIVAZIONI PER CLIENTE
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Attiva promozione su cliente</h3></div>',
-      '<div class="card-b">',
-        '<form id="fAct" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
-          '<select class="border rounded-xl px-3 py-2 md:col-span-2" name="clientId">',
-            clients.map(c=>'<option value="'+c.id+'" '+(preClient===c.id?'selected':'')+'>'+c.name+'</option>').join(''),
-          '</select>',
-          '<select class="border rounded-xl px-3 py-2 md:col-span-2" name="promoId">',
-            catalog.map(p=>'<option value="'+p.id+'">'+p.title+'</option>').join(''),
-          '</select>',
-          '<input class="border rounded-xl px-3 py-2" type="date" name="start" value="'+today()+'">',
-          '<input class="border rounded-xl px-3 py-2" type="date" name="end" placeholder="Fine (opzionale)">',
-          '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="note" placeholder="Note per questo cliente"></textarea></div>',
-          '<div class="md:col-span-6 text-right"><button class="btn-primary">Attiva</button></div>',
-        '</form>',
-      '</div></div>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Attiva promozione su cliente</h3></div>',
+          '<div class="card-b">',
+            '<form id="fAct" class="grid grid-cols-1 md:grid-cols-6 gap-3">',
+              '<select class="border rounded-xl px-3 py-2 md:col-span-2" name="clientId">',
+                clients.map(c=>'<option value="'+c.id+'" '+(preClient===c.id?'selected':'')+'>'+c.name+'</option>').join(''),
+              '</select>',
+              '<select class="border rounded-xl px-3 py-2 md:col-span-2" name="promoId">',
+                catalog.map(p=>'<option value="'+p.id+'">'+p.title+'</option>').join(''),
+              '</select>',
+              '<input class="border rounded-xl px-3 py-2" type="date" name="start" value="'+today()+'">',
+              '<input class="border rounded-xl px-3 py-2" type="date" name="end" placeholder="Fine (opzionale)">',
+              '<div class="md:col-span-6"><textarea class="border rounded-xl px-3 py-2 w-full" name="note" placeholder="Note per questo cliente"></textarea></div>',
+              '<div class="md:col-span-6 text-right"><button class="btn-primary">Attiva</button></div>',
+            '</form>',
+          '</div></div>',
 
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Promozioni per cliente</h3></div>',
-        '<div class="card-b overflow-auto">',
-          '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-          '<th class="text-left px-2 py-2">Cliente</th><th class="text-left px-2 py-2">Promo</th><th class="text-left px-2 py-2">Periodo</th><th class="text-left px-2 py-2">Giorni</th><th class="text-left px-2 py-2">Note</th><th class="px-2 py-2"></th>',
-          '</tr></thead><tbody id="rowsAct">', cPromos.map(rowAct).join('') ,'</tbody></table>',
-        '</div>',
-      '</div>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Promozioni per cliente</h3></div>',
+            '<div class="card-b overflow-auto">',
+              '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+              '<th class="text-left px-2 py-2">Cliente</th><th class="text-left px-2 py-2">Promo</th><th class="text-left px-2 py-2">Periodo</th><th class="text-left px-2 py-2">Giorni</th><th class="text-left px-2 py-2">Note</th><th class="px-2 py-2"></th>',
+              '</tr></thead><tbody id="rowsAct">', cPromos.map(rowAct).join('') ,'</tbody></table>',
+            '</div>',
+          '</div>',
 
-    '</div>'
-  ].join('');
+        '</div>'
+      ].join('');
 
-  // Handlers catalogo
-  const repaintCat=()=>{ document.getElementById('rowsCat').innerHTML = catalog.map(rowCatalog).join(''); attachDelCat(); };
-  function attachDelCat(){
-    document.querySelectorAll('[data-del-cat]').forEach(b=>b.addEventListener('click',()=>{
-      const id=b.getAttribute('data-del-cat');
-      if(confirm('Eliminare voce di catalogo?')){
-        catalog=catalog.filter(x=>x.id!==id); setPromos(catalog); repaintCat();
+      const repaintCat=()=>{ document.getElementById('rowsCat').innerHTML = catalog.map(rowCatalog).join(''); attachDelCat(); };
+      function attachDelCat(){
+        document.querySelectorAll('[data-del-cat]').forEach(b=>b.addEventListener('click',()=>{
+          const id=b.getAttribute('data-del-cat');
+          if(confirm('Eliminare voce di catalogo?')){
+            catalog=catalog.filter(x=>x.id!==id); setPromos(catalog); repaintCat();
+          }
+        }));
       }
-    }));
-  }
-  attachDelCat();
+      attachDelCat();
 
-  document.getElementById('fCat').addEventListener('submit',e=>{
-    e.preventDefault();
-    const data=Object.fromEntries(new FormData(e.target).entries());
-    const provinces=[...document.querySelectorAll('#pProvs input[type=checkbox]:checked')].map(x=>x.value);
-    const p={id:'PC-'+Date.now(), title:data.title, desc:data.desc, defaultDays:Number(data.defaultDays||0)||null, provinces};
-    catalog.unshift(p); setPromos(catalog); e.target.reset(); repaintCat();
-  });
+      document.getElementById('fCat').addEventListener('submit',e=>{
+        e.preventDefault();
+        const data=Object.fromEntries(new FormData(e.target).entries());
+        const provinces=[...document.querySelectorAll('#pProvs input[type=checkbox]:checked')].map(x=>x.value);
+        const p={id:'PC-'+Date.now(), title:data.title, desc:data.desc, defaultDays:Number(data.defaultDays||0)||null, provinces};
+        catalog.unshift(p); setPromos(catalog); e.target.reset(); repaintCat();
+      });
 
-  // Handlers attivazioni
-  const repaintAct=()=>{ document.getElementById('rowsAct').innerHTML = cPromos.map(rowAct).join(''); attachActBtns(); };
-  function attachActBtns(){
-    // Elimina attivazione
-    document.querySelectorAll('[data-del-act]').forEach(b=>b.addEventListener('click',()=>{
-      const id=b.getAttribute('data-del-act');
-      if(confirm('Eliminare attivazione?')){
-        cPromos=cPromos.filter(x=>x.id!==id); setCPromos(cPromos); repaintAct();
+      const repaintAct=()=>{ document.getElementById('rowsAct').innerHTML = cPromos.map(rowAct).join(''); attachActBtns(); };
+      function attachActBtns(){
+        document.querySelectorAll('[data-del-act]').forEach(b=>b.addEventListener('click',()=>{
+          const id=b.getAttribute('data-del-act');
+          if(confirm('Eliminare attivazione?')){
+            cPromos=cPromos.filter(x=>x.id!==id); setCPromos(cPromos); repaintAct();
+          }
+        }));
+        document.querySelectorAll('[data-ics]').forEach(btn=>btn.addEventListener('click',()=>{
+          const id=btn.getAttribute('data-ics'); const cp=cPromos.find(x=>x.id===id); if(!cp||!cp.end){ alert('Imposta la data di fine'); return; }
+          const end=new Date(cp.end); const start=new Date(end.getTime()-7*24*60*60*1000);
+          const pad=n=>String(n).padStart(2,'0');
+          const toICS=d=>d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'T'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
+          const esc=s=>String(s||'').replace(/[\\,;\\n]/g, m => (m==='\\'?'\\\\':m===','?'\\,':m===';'?'\\;':'\\n'));
+          const cli=clients.find(c=>c.id===cp.clientId);
+          const ics=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//CRM Lenti//IT','CALSCALE:GREGORIAN','BEGIN:VEVENT',
+            'UID:CP-'+id,'DTSTAMP:'+toICS(new Date()),'DTSTART:'+toICS(start),'DTEND:'+toICS(new Date(start.getTime()+60*60*1000)),
+            'SUMMARY:'+esc('Promo in scadenza – '+(cli?cli.name:'Cliente')),'DESCRIPTION:'+esc(cp.title+(cp.note?(' — '+cp.note):'')),'END:VEVENT','END:VCALENDAR'].join('\r\n');
+          const blob=new Blob([ics],{type:'text/calendar'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='promo_cliente_'+id+'.ics'; a.click();
+        }));
       }
-    }));
-    // ICS scadenza per cliente
-    document.querySelectorAll('[data-ics]').forEach(btn=>btn.addEventListener('click',()=>{
-      const id=btn.getAttribute('data-ics'); const cp=cPromos.find(x=>x.id===id); if(!cp||!cp.end){ alert('Imposta la data di fine'); return; }
-      const end=new Date(cp.end); const start=new Date(end.getTime()-7*24*60*60*1000);
-      const pad=n=>String(n).padStart(2,'0');
-      const toICS=d=>d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'T'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
-      const esc=s=>String(s||'').replace(/[\\,;\\n]/g, m => (m==='\\'?'\\\\':m===','?'\\,':m===';'?'\\;':'\\n'));
-      const cli=clients.find(c=>c.id===cp.clientId);
-      const ics=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//CRM Lenti//IT','CALSCALE:GREGORIAN','BEGIN:VEVENT',
-        'UID:CP-'+id,'DTSTAMP:'+toICS(new Date()),'DTSTART:'+toICS(start),'DTEND:'+toICS(new Date(start.getTime()+60*60*1000)),
-        'SUMMARY:'+esc('Promo in scadenza – '+(cli?cli.name:'Cliente')),'DESCRIPTION:'+esc(cp.title+(cp.note?(' — '+cp.note):'')),'END:VEVENT','END:VCALENDAR'].join('\r\n');
-      const blob=new Blob([ics],{type:'text/calendar'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='promo_cliente_'+id+'.ics'; a.click();
-    }));
-  }
-  attachActBtns();
+      attachActBtns();
 
-  document.getElementById('fAct').addEventListener('submit',e=>{
-    e.preventDefault();
-    const data=Object.fromEntries(new FormData(e.target).entries());
-    const promo=catalog.find(p=>p.id===data.promoId);
-    let end=data.end;
-    if(!end && promo?.defaultDays){
-      end = addDays(data.start, Number(promo.defaultDays));
+      document.getElementById('fAct').addEventListener('submit',e=>{
+        e.preventDefault();
+        const data=Object.fromEntries(new FormData(e.target).entries());
+        const promo=catalog.find(p=>p.id===data.promoId);
+        let end=data.end;
+        if(!end && promo?.defaultDays){
+          end = addDays(data.start, Number(promo.defaultDays));
+        }
+        const cp={id:'CP-'+Date.now(), clientId:data.clientId, promoId:data.promoId, title:promo?promo.title:'Promo', start:data.start||today(), end:end||'', note:data.note||''};
+        cPromos.unshift(cp); setCPromos(cPromos);
+        window._promoClientPreselect='';
+        e.target.reset(); repaintAct();
+        alert('Promo attivata al cliente');
+      });
     }
-    const cp={id:'CP-'+Date.now(), clientId:data.clientId, promoId:data.promoId, title:promo?promo.title:'Promo', start:data.start||today(), end:end||'', note:data.note||''};
-    cPromos.unshift(cp); setCPromos(cPromos);
-    window._promoClientPreselect=''; // pulisci preselect
-    e.target.reset(); repaintAct();
-    alert('Promo attivata al cliente');
-  });
-}
 
     // ——— Fatturati & Statistiche ———
-    function parseCSV(text){
-      const delim = text.indexOf(';')>-1 && text.indexOf(',')>-1 ? (text.split('\\n')[0].split(';').length > text.split('\\n')[0].split(',').length ? ';' : ',') : (text.indexOf(';')>-1?';':',');
-      const rows=text.split(/\\r?\\n/).filter(r=>r.trim().length).map(r=>r.split(delim));
+    function parseCSV(text){function parseCSV(text){
+  const firstLine = (text.split('\n')[0] || '');
+  const delim = (firstLine.split(';').length > firstLine.split(',').length)
+    ? ';'
+    : (firstLine.includes(';') ? ';' : ',');
+
+  const rows = text
+    .split(/\r?\n/)
+    .filter(r => r.trim().length)
+    .map(r => r.split(delim));
+
+  return { header: rows[0].map(h => h.trim()), rows: rows.slice(1) };
+}
+      const delim = text.indexOf(';')>-1 && text.indexOf(',')>-1 ? (text.split('\n')[0].split(';').length > text.split('\n')[0].split(',').length ? ';' : ',') : (text.indexOf(';')>-1?';':',');
+      const rows=text.split(/\r?\n/).filter(r=>r.trim().length).map(r=>r.split(delim));
       return {header:rows[0].map(h=>h.trim()), rows:rows.slice(1)};
     }
-    function normalizeAmount(s){ if(s==null) return 0; s=String(s).replace(/\\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
+    function normalizeAmount(s){ if(s==null) return 0; s=String(s).replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
 
-// ================== FATTURATI & STATISTICHE (rewrite safe) ==================
-function renderFatturati(root){
-  const VERSION = 'FATTURATI v28-10';
+    function renderFatturati(root){
+      const VERSION = 'FATTURATI v28-10';
 
-  // --- dati ---
-  var clients = getClients();
-  var sales   = getSales();   // {clientId, month:'YYYY-MM', amount}
-  var salesW  = getSalesW();  // {clientId, year, week, dateISO, amount}
+      var clients = getClients();
+      var sales   = getSales();
+      var salesW  = getSalesW();
 
-  // --- util ---
-  function _cmp(a,b,dir){ return dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0)); }
-  function _euro(n){ return fmtEuro(Number(n)||0); }
-  function _monthKey(y,m){ return y+'-'+m; }
-  function _draw(canvasId, labels, series){
-    var c=document.getElementById(canvasId); if(!c) return;
-    var ctx=c.getContext('2d'), w=c.width=c.clientWidth, h=c.height=200, pad=20;
-    ctx.clearRect(0,0,w,h);
-    var max=Math.max(1, ...series); var stepX=(w-2*pad)/Math.max(1,labels.length-1);
-    ctx.strokeStyle='#94a3b8'; ctx.beginPath(); ctx.moveTo(pad,h-pad); ctx.lineTo(w-pad,h-pad); ctx.stroke();
-    ctx.strokeStyle='#2563eb'; ctx.beginPath();
-    series.forEach((v,i)=>{ var x=pad+i*stepX, y=h-pad-(v/max)*(h-2*pad); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
-    ctx.stroke(); ctx.fillStyle='#0f172a'; ctx.font='10px system-ui';
-    labels.forEach((l,i)=>{ var x=pad+i*stepX; ctx.fillText(l.slice(5), x-8, h-6); });
-  }
-  function weekAmt(cid,Y,W){ const r=salesW.find(x=>x.clientId===cid&&x.year===Y&&x.week===W); return Number((r||{}).amount||0); }
-  function lastWeek(){
-    const set=new Set(salesW.map(w=>w.year+'|'+w.week));
-    const arr=[...set].map(s=>({y:+s.split('|')[0], w:+s.split('|')[1]})).sort((a,b)=>a.y-b.y||a.w-b.w);
-    return arr[0]? {year:arr[arr.length-1].y, week:arr[arr.length-1].w} : {year:new Date().getFullYear(), week:1};
-  }
-  function monthlyRow(c,y,m){
-    const mk=_monthKey(y,m), cur=sales.filter(s=>s.clientId===c.id&&s.month===mk).reduce((a,b)=>a+Number(b.amount||0),0);
-    const prev=(m==='01')?`${y-1}-12`:`${y}-${String(+m-1).padStart(2,'0')}`;
-    const yoy =`${y-1}-${m}`;
-    const prv=sales.filter(s=>s.clientId===c.id&&s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
-    const yv =sales.filter(s=>s.clientId===c.id&&s.month===yoy ).reduce((a,b)=>a+Number(b.amount||0),0);
-    return { id:c.id, name:c.name, goal:Number(c.goalMonthly||0), amount:cur, delta:cur-prv, deltaY:cur-yv, prev, prevYoY:yoy };
-  }
-  function yearlyTotals(c,Y){
-    let tot=0, prev=0;
-    for(let i=1;i<=12;i++){
-      const m=`${Y}-${String(i).padStart(2,'0')}`;
-      tot  += sales.filter(s=>s.clientId===c.id&&s.month===m).reduce((a,b)=>a+Number(b.amount||0),0);
-      const mP=`${Y-1}-${String(i).padStart(2,'0')}`;
-      prev += sales.filter(s=>s.clientId===c.id&&s.month===mP).reduce((a,b)=>a+Number(b.amount||0),0);
+      function _cmp(a,b,dir){ return dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0)); }
+      function _euro(n){ return fmtEuro(Number(n)||0); }
+      function _monthKey(y,m){ return y+'-'+m; }
+      function _draw(canvasId, labels, series){
+        var c=document.getElementById(canvasId); if(!c) return;
+        var ctx=c.getContext('2d'), w=c.width=c.clientWidth, h=c.height=200, pad=20;
+        ctx.clearRect(0,0,w,h);
+        var max=Math.max(1, ...series); var stepX=(w-2*pad)/Math.max(1,labels.length-1);
+        ctx.strokeStyle='#94a3b8'; ctx.beginPath(); ctx.moveTo(pad,h-pad); ctx.lineTo(w-pad,h-pad); ctx.stroke();
+        ctx.strokeStyle='#2563eb'; ctx.beginPath();
+        series.forEach((v,i)=>{ var x=pad+i*stepX, y=h-pad-(v/max)*(h-2*pad); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+        ctx.stroke(); ctx.fillStyle='#0f172a'; ctx.font='10px system-ui';
+        labels.forEach((l,i)=>{ var x=pad+i*stepX; ctx.fillText(l.slice(5), x-8, h-6); });
+      }
+      function weekAmt(cid,Y,W){ const r=salesW.find(x=>x.clientId===cid&&x.year===Y&&x.week===W); return Number((r||{}).amount||0); }
+      function lastWeek(){
+        const set=new Set(salesW.map(w=>w.year+'|'+w.week));
+        const arr=[...set].map(s=>({y:+s.split('|')[0], w:+s.split('|')[1]})).sort((a,b)=>a.y-b.y||a.w-b.w);
+        return arr[0]? {year:arr[arr.length-1].y, week:arr[arr.length-1].w} : {year:new Date().getFullYear(), week:1};
+      }
+      function monthlyRow(c,y,m){
+        const mk=_monthKey(y,m), cur=sales.filter(s=>s.clientId===c.id&&s.month===mk).reduce((a,b)=>a+Number(b.amount||0),0);
+        const prev=(m==='01')?`${y-1}-12`:`${y}-${String(+m-1).padStart(2,'0')}`;
+        const yoy =`${y-1}-${m}`;
+        const prv=sales.filter(s=>s.clientId===c.id&&s.month===prev).reduce((a,b)=>a+Number(b.amount||0),0);
+        const yv =sales.filter(s=>s.clientId===c.id&&s.month===yoy ).reduce((a,b)=>a+Number(b.amount||0),0);
+        return { id:c.id, name:c.name, goal:Number(c.goalMonthly||0), amount:cur, delta:cur-prv, deltaY:cur-yv, prev, prevYoY:yoy };
+      }
+      function yearlyTotals(c,Y){
+        let tot=0, prev=0;
+        for(let i=1;i<=12;i++){
+          const m=`${Y}-${String(i).padStart(2,'0')}`;
+          tot  += sales.filter(s=>s.clientId===c.id&&s.month===m).reduce((a,b)=>a+Number(b.amount||0),0);
+          const mP=`${Y-1}-${String(i).padStart(2,'0')}`;
+          prev += sales.filter(s=>s.clientId===c.id&&s.month===mP).reduce((a,b)=>a+Number(b.amount||0),0);
+        }
+        const goalY = Number(c.goalMonthly||0)*12;
+        return { id:c.id, name:c.name, amountY:tot, goalY, deltaYG:tot-goalY, deltaYoY:tot-prev };
+      }
+
+      const nowYM = yyyymm();
+      const defY  = +nowYM.slice(0,4);
+      const defM  = nowYM.slice(5);
+      const years = [defY-3,defY-2,defY-1,defY];
+      const months = [['01','Gennaio'],['02','Febbraio'],['03','Marzo'],['04','Aprile'],['05','Maggio'],['06','Giugno'],['07','Luglio'],['08','Agosto'],['09','Settembre'],['10','Ottobre'],['11','Novembre'],['12','Dicembre']];
+      let sortM=lsGet('fattSort',{key:'amount',dir:'desc'}), sortW=lsGet('fattSortW',{key:'amount',dir:'desc'}), sortY=lsGet('fattSortY',{key:'amountY',dir:'desc'});
+
+      root.innerHTML = [
+        '<div class="space-y-4">',
+          '<div class="text-xs text-slate-500">',VERSION,'</div>',
+
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Import CSV</h3></div>',
+            '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
+              '<select id="impType" class="border rounded-xl px-3 py-2">',
+                '<option value="monthly">Mensile (cliente,mese,importo)</option>',
+                '<option value="weekly">Settimanale (cliente,week40,week41,...)</option>',
+                '<option value="annual">Annuale YTD (cliente,gen..dic)</option>',
+              '</select>',
+              '<input id="impYear" class="border rounded-xl px-3 py-2" type="number" placeholder="Anno">',
+              '<input id="impWeeks" class="border rounded-xl px-3 py-2 md:col-span-2" placeholder="Settimane (es. 40,41,42)">',
+              '<input id="impFile" type="file" accept=".csv,text/csv" class="md:col-span-2">',
+              '<div class="md:col-span-6 text-right"><button id="doImport" class="btn-primary">Importa</button></div>',
+            '</div>',
+          '</div>',
+
+          '<div class="card"><div class="card-h">',
+            '<h3 class="font-semibold">Riepilogo mese</h3>',
+            '<div class="flex items-center gap-2">',
+              '<select id="mYear" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join('') ,'</select>',
+              '<select id="mMonth" class="border rounded-xl px-3 py-2">', months.map(([k,l])=>`<option value="${k}" ${k===defM?'selected':''}>${l}</option>`).join('') ,'</select>',
+            '</div>',
+          '</div>',
+          '<div class="card-b overflow-auto">',
+            '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+              '<th class="text-left px-2 py-2 cursor-pointer" data-sort="name">Cliente</th>',
+              '<th class="text-right px-2 py-2 cursor-pointer" data-sort="goal">Obiettivo</th>',
+              '<th class="text-right px-2 py-2 cursor-pointer" data-sort="amount">Fatturato</th>',
+              '<th class="text-left  px-2 py-2">Avanzamento</th>',
+              '<th class="text-right px-2 py-2 cursor-pointer" data-sort="delta">Δ MoM</th>',
+              '<th class="text-right px-2 py-2 cursor-pointer" data-sort="deltaY">Δ YoY</th>',
+            '</tr></thead><tbody id="rowsM"></tbody></table>',
+            '<div class="mt-3 text-right"><button id="exportCSV" class="btn">⬇️ Export CSV cliente×mese</button></div>',
+          '</div></div>',
+
+          '<div class="card" id="cardY"><div class="card-h">',
+            '<h3 class="font-semibold">Riepilogo annuale</h3>',
+            '<div class="flex items-center gap-2">',
+              '<select id="yYear" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join('') ,'</select>',
+            '</div>',
+          '</div>',
+          '<div class="card-b overflow-auto">',
+            '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+              '<th class="text-left px-2 py-2 cursor-pointer" data-sorty="name">Cliente</th>',
+              '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="goalY">Obiettivo annuo</th>',
+              '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="amountY">Fatturato anno</th>',
+              '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="deltaYG">Δ vs obiettivo</th>',
+              '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="deltaYoY">Δ YoY</th>',
+            '</tr></thead><tbody id="rowsY"></tbody></table>',
+            '<div class="mt-3 text-right space-x-2">',
+              '<button id="exportCSVY" class="btn">⬇️ Export CSV annuo</button>',
+              '<button id="printY" class="btn">🖨️ Stampa/PDF</button>',
+            '</div>',
+          '</div></div>',
+
+          (function(){const lw=lastWeek();return [
+            '<div class="card"><div class="card-h"><h3 class="font-semibold">Riepilogo settimanale</h3>',
+              '<div class="flex items-center gap-2">',
+                '<select id="wYear" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===lw.year?'selected':''}>${y}</option>`).join('') ,'</select>',
+                '<select id="wWeek" class="border rounded-xl px-3 py-2">', Array.from({length:53},(_,i)=>i+1).map(w=>`<option ${w===lw.week?'selected':''}>${w}</option>`).join('') ,'</select>',
+              '</div>',
+            '</div>',
+            '<div class="card-b overflow-auto">',
+              '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
+                '<th class="text-left px-2 py-2 cursor-pointer" data-sortw="name">Cliente</th>',
+                '<th class="text-right px-2 py-2 cursor-pointer" data-sortw="amount">Importo sett.</th>',
+                '<th class="text-right px-2 py-2 cursor-pointer" data-sortw="deltaW">Δ vs sett. prec.</th>',
+              '</tr></thead><tbody id="rowsW"></tbody></table>',
+            '</div></div>'
+          ].join('');})(),
+
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Grafico mensile (totale)</h3></div>',
+            '<div class="card-b"><canvas id="chartTot" style="width:100%"></canvas></div>',
+          '</div>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Andamento cliente (YTD)</h3></div>',
+            '<div class="card-b">',
+              '<div class="flex items-center gap-2 mb-3">',
+                '<select id="selClient" class="border rounded-xl px-3 py-2">', clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('') ,'</select>',
+                '<select id="yearYTD" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join('') ,'</select>',
+              '</div>',
+              '<canvas id="chartClient" style="width:100%"></canvas>',
+            '</div>',
+          '</div>',
+        '</div>'
+      ].join('');
+
+      function paintMonthly(){
+        const y=+document.getElementById('mYear').value, m=document.getElementById('mMonth').value;
+        const rows = clients.map(c=>monthlyRow(c,y,m)).sort((A,B)=>{
+          const k=sortM.key,d=sortM.dir;
+          if(k==='name')   return _cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
+          if(k==='goal')   return _cmp(A.goal,B.goal,d);
+          if(k==='amount') return _cmp(A.amount,B.amount,d);
+          if(k==='delta')  return _cmp(A.delta,B.delta,d);
+          if(k==='deltaY') return _cmp(A.deltaY,B.deltaY,d);
+          return 0;
+        }).map(r=>{
+          const pct = r.goal ? Math.min(100, Math.round(100*r.amount/r.goal)) : null;
+          const bar = `<div class="w-40 h-2 bg-slate-200 rounded-full overflow-hidden"><div style="width:${pct||0}%;height:100%" class="bg-blue-500"></div></div> ${pct!=null?(pct+'%'):'—'}`;
+          const cls = r.delta<0?'text-red-600':(r.delta>0?'text-emerald-600':'');
+          const clsY= r.deltaY<0?'text-red-600':(r.deltaY>0?'text-emerald-600':'');
+          return [
+            '<tr class="border-b">',
+              '<td class="px-2 py-2">',r.name,'</td>',
+              '<td class="px-2 py-2 text-right">', r.goal?_euro(r.goal):'—','</td>',
+              '<td class="px-2 py-2 text-right">', _euro(r.amount),'</td>',
+              '<td class="px-2 py-2">', bar ,'</td>',
+              '<td class="px-2 py-2 text-right ',cls,'">', (r.delta>0?'+':''), _euro(r.delta),' (',r.prev,')</td>',
+              '<td class="px-2 py-2 text-right ',clsY,'">', (r.deltaY>0?'+':''), _euro(r.deltaY),' (',r.prevYoY,')</td>',
+            '</tr>'
+          ].join('');
+        }).join('');
+        document.getElementById('rowsM').innerHTML = rows;
+        document.querySelectorAll('[data-sort]').forEach(th=>th.onclick=()=>{ const key=th.getAttribute('data-sort'); const dir=(sortM.key===key&&sortM.dir==='asc')?'desc':'asc'; sortM={key,dir}; lsSet('fattSort',sortM); paintMonthly(); });
+      }
+
+      function paintYearly(){
+        const Y=+document.getElementById('yYear').value;
+        const rows = clients.map(c=>yearlyTotals(c,Y)).sort((A,B)=>{
+          const k=sortY.key,d=sortY.dir;
+          if(k==='name')     return _cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
+          if(k==='goalY')    return _cmp(A.goalY,B.goalY,d);
+          if(k==='amountY')  return _cmp(A.amountY,B.amountY,d);
+          if(k==='deltaYG')  return _cmp(A.deltaYG,B.deltaYG,d);
+          if(k==='deltaYoY') return _cmp(A.deltaYoY,B.deltaYoY,d);
+          return 0;
+        }).map(r=>{
+          const clsG=r.deltaYG<0?'text-red-600':(r.deltaYG>0?'text-emerald-600':'');
+          const clsY=r.deltaYoY<0?'text-red-600':(r.deltaYoY>0?'text-emerald-600':'');
+          return [
+            '<tr class="border-b">',
+              '<td class="px-2 py-2">',r.name,'</td>',
+              '<td class="px-2 py-2 text-right">', r.goalY?_euro(r.goalY):'—','</td>',
+              '<td class="px-2 py-2 text-right">', _euro(r.amountY),'</td>',
+              '<td class="px-2 py-2 text-right ',clsG,'">', (r.deltaYG>0?'+':''), _euro(r.deltaYG),'</td>',
+              '<td class="px-2 py-2 text-right ',clsY,'">', (r.deltaYoY>0?'+':''), _euro(r.deltaYoY),'</td>',
+            '</tr>'
+          ].join('');
+        }).join('');
+        document.getElementById('rowsY').innerHTML = rows;
+        document.querySelectorAll('[data-sorty]').forEach(th=>th.onclick=()=>{ const key=th.getAttribute('data-sorty'); const dir=(sortY.key===key&&sortY.dir==='asc')?'desc':'asc'; sortY={key,dir}; lsSet('fattSortY',sortY); paintYearly(); });
+      }
+
+      function paintWeekly(){
+        const Y=+document.getElementById('wYear').value, W=+document.getElementById('wWeek').value;
+        const prevY=(W===1)?(Y-1):Y, prevW=(W===1)?52:(W-1);
+        const rows = clients.map(c=>{
+          const a=weekAmt(c.id,Y,W), p=weekAmt(c.id,prevY,prevW);
+          return {name:c.name, amount:a, deltaW:a-p};
+        }).sort((A,B)=>{ const k=sortW.key,d=sortW.dir; if(k==='name')return _cmp(A.name.toLowerCase(),B.name.toLowerCase(),d); if(k==='amount')return _cmp(A.amount,B.amount,d); if(k==='deltaW')return _cmp(A.deltaW,B.deltaW,d); return 0; })
+          .map(r=>{
+            const cls=r.deltaW<0?'text-red-600':(r.deltaW>0?'text-emerald-600':'');
+            return ['<tr class="border-b">','<td class="px-2 py-2">',r.name,'</td>','<td class="px-2 py-2 text-right">',_euro(r.amount),'</td>','<td class="px-2 py-2 text-right ',cls,'">',(r.deltaW>0?'+':''),_euro(r.deltaW),'</td>','</tr>'].join('');
+          }).join('');
+        document.getElementById('rowsW').innerHTML = rows;
+        document.querySelectorAll('[data-sortw]').forEach(th=>th.onclick=()=>{ const key=th.getAttribute('data-sortw'); const dir=(sortW.key===key&&sortW.dir==='asc')?'desc':'asc'; sortW={key,dir}; lsSet('fattSortW',sortW); paintWeekly(); });
+      }
+
+      function paintCharts(){
+        const months=[]; const now=new Date();
+        for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); months.push(d.toISOString().slice(0,7)); }
+        const totals=months.map(m=> sales.filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
+        _draw('chartTot', months, totals);
+        const id=document.getElementById('selClient').value, Y=+document.getElementById('yearYTD').value;
+        const labs=[...Array(12)].map((_,i)=>`${Y}-${String(i+1).padStart(2,'0')}`);
+        const ser=labs.map(m=> sales.filter(s=>s.clientId===id && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
+        _draw('chartClient', labs, ser);
+      }
+
+      paintMonthly(); paintYearly(); paintWeekly(); paintCharts();
+      document.getElementById('mYear').addEventListener('change', paintMonthly);
+      document.getElementById('mMonth').addEventListener('change', paintMonthly);
+      document.getElementById('yYear').addEventListener('change', paintYearly);
+      document.getElementById('wYear').addEventListener('change', paintWeekly);
+      document.getElementById('wWeek').addEventListener('change', paintWeekly);
+      document.getElementById('selClient').addEventListener('change', paintCharts);
+      document.getElementById('yearYTD').addEventListener('change', paintCharts);
+
+      document.getElementById('exportCSV').addEventListener('click', ()=>{
+        const rows=[['client_code','client_name','month','amount']];
+        const mapName=Object.fromEntries(clients.map(c=>[c.id,c.name]));
+        const mapCode=Object.fromEntries(clients.map(c=>[c.id,c.code||'']));
+        sales.forEach(s=> rows.push([mapCode[s.clientId]||'', mapName[s.clientId]||'', s.month, String(s.amount||0)]));
+        const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace(/"/g,'""')+'"'):v).join(',')).join('\r\n');
+        const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clienti_mese.csv'; a.click();
+      });
+      document.getElementById('exportCSVY').addEventListener('click', ()=>{
+        const Y=+document.getElementById('yYear').value;
+        const rows=[['client_code','client_name','year','amount','annual_goal','delta_vs_goal','delta_yoy']];
+        const mapName=Object.fromEntries(clients.map(c=>[c.id,c.name]));
+        const mapCode=Object.fromEntries(clients.map(c=>[c.id,c.code||'']));
+        clients.forEach(c=>{ const t=yearlyTotals(c,Y); rows.push([mapCode[c.id]||'', mapName[c.id]||'', String(Y), String(t.amountY||0), String(t.goalY||0), String(t.deltaYG||0), String(t.deltaYoY||0)]); });
+        const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace(/"/g,'""')+'"'):v).join(',')).join('\r\n');
+        const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='fatturato_annuale_'+Y+'.csv'; a.click();
+      });
+      document.getElementById('printY').addEventListener('click', ()=>{
+        const node=document.getElementById('cardY'); const w=window.open('','_blank');
+        w.document.write(`<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Riepilogo annuale</title>
+          <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;color:#0f172a}
+          h1{font-size:18px;margin:0 0 12px}table{width:100%;border-collapse:collapse;font-size:12px}
+          th,td{border:1px solid #e2e8f0;padding:6px 8px;text-align:right}th{text-align:left;background:#f1f5f9;color:#475569}
+          td:first-child,th:first-child{text-align:left}</style></head><body>
+          <h1>Riepilogo annuale</h1>${node.querySelector('table')?.outerHTML || node.innerHTML}</body></html>`);
+        w.document.close(); w.focus(); w.print();
+      });
     }
-    const goalY = Number(c.goalMonthly||0)*12;
-    return { id:c.id, name:c.name, amountY:tot, goalY, deltaYG:tot-goalY, deltaYoY:tot-prev };
-  }
 
-  // --- range/selettori ---
-  const nowYM = yyyymm();
-  const defY  = +nowYM.slice(0,4);
-  const defM  = nowYM.slice(5);
-  const years = [defY-3,defY-2,defY-1,defY];
-  const months = [['01','Gennaio'],['02','Febbraio'],['03','Marzo'],['04','Aprile'],['05','Maggio'],['06','Giugno'],['07','Luglio'],['08','Agosto'],['09','Settembre'],['10','Ottobre'],['11','Novembre'],['12','Dicembre']];
-  let sortM=lsGet('fattSort',{key:'amount',dir:'desc'}), sortW=lsGet('fattSortW',{key:'amount',dir:'desc'}), sortY=lsGet('fattSortY',{key:'amountY',dir:'desc'});
-
-  // --- UI ---
-  root.innerHTML = [
-    '<div class="space-y-4">',
-      '<div class="text-xs text-slate-500">',VERSION,'</div>',
-
-      // IMPORT (rimane uguale alla tua logica, bottone solo segnaposto)
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Import CSV</h3></div>',
-        '<div class="card-b grid grid-cols-1 md:grid-cols-6 gap-3">',
-          '<select id="impType" class="border rounded-xl px-3 py-2">',
-            '<option value="monthly">Mensile (cliente,mese,importo)</option>',
-            '<option value="weekly">Settimanale (cliente,week40,week41,...)</option>',
-            '<option value="annual">Annuale YTD (cliente,gen..dic)</option>',
-          '</select>',
-          '<input id="impYear" class="border rounded-xl px-3 py-2" type="number" placeholder="Anno">',
-          '<input id="impWeeks" class="border rounded-xl px-3 py-2 md:col-span-2" placeholder="Settimane (es. 40,41,42)">',
-          '<input id="impFile" type="file" accept=".csv,text/csv" class="md:col-span-2">',
-          '<div class="md:col-span-6 text-right"><button id="doImport" class="btn-primary">Importa</button></div>',
-        '</div>',
-      '</div>',
-
-      // MENSILE
-      '<div class="card"><div class="card-h">',
-        '<h3 class="font-semibold">Riepilogo mese</h3>',
-        '<div class="flex items-center gap-2">',
-          '<select id="mYear" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join('') ,'</select>',
-          '<select id="mMonth" class="border rounded-xl px-3 py-2">', months.map(([k,l])=>`<option value="${k}" ${k===defM?'selected':''}>${l}</option>`).join('') ,'</select>',
-        '</div>',
-      '</div>',
-      '<div class="card-b overflow-auto">',
-        '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-          '<th class="text-left px-2 py-2 cursor-pointer" data-sort="name">Cliente</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sort="goal">Obiettivo</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sort="amount">Fatturato</th>',
-          '<th class="text-left  px-2 py-2">Avanzamento</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sort="delta">Δ MoM</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sort="deltaY">Δ YoY</th>',
-        '</tr></thead><tbody id="rowsM"></tbody></table>',
-        '<div class="mt-3 text-right"><button id="exportCSV" class="btn">⬇️ Export CSV cliente×mese</button></div>',
-      '</div></div>',
-
-      // ANNUALE  **QUI APPARE IL FATTURATO ANNUO PER CLIENTE + EXPORT/STAMPA**
-      '<div class="card" id="cardY"><div class="card-h">',
-        '<h3 class="font-semibold">Riepilogo annuale</h3>',
-        '<div class="flex items-center gap-2">',
-          '<select id="yYear" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join('') ,'</select>',
-        '</div>',
-      '</div>',
-      '<div class="card-b overflow-auto">',
-        '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-          '<th class="text-left px-2 py-2 cursor-pointer" data-sorty="name">Cliente</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="goalY">Obiettivo annuo</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="amountY">Fatturato anno</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="deltaYG">Δ vs obiettivo</th>',
-          '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="deltaYoY">Δ YoY</th>',
-        '</tr></thead><tbody id="rowsY"></tbody></table>',
-        '<div class="mt-3 text-right space-x-2">',
-          '<button id="exportCSVY" class="btn">⬇️ Export CSV annuo</button>',
-          '<button id="printY" class="btn">🖨️ Stampa/PDF</button>',
-        '</div>',
-      '</div></div>',
-
-      // SETTIMANALE
-      (function(){const lw=lastWeek();return [
-        '<div class="card"><div class="card-h"><h3 class="font-semibold">Riepilogo settimanale</h3>',
-          '<div class="flex items-center gap-2">',
-            '<select id="wYear" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===lw.year?'selected':''}>${y}</option>`).join('') ,'</select>',
-            '<select id="wWeek" class="border rounded-xl px-3 py-2">', Array.from({length:53},(_,i)=>i+1).map(w=>`<option ${w===lw.week?'selected':''}>${w}</option>`).join('') ,'</select>',
-          '</div>',
-        '</div>',
-        '<div class="card-b overflow-auto">',
-          '<table class="min-w-full text-sm"><thead class="bg-slate-100 text-slate-600"><tr>',
-            '<th class="text-left px-2 py-2 cursor-pointer" data-sortw="name">Cliente</th>',
-            '<th class="text-right px-2 py-2 cursor-pointer" data-sortw="amount">Importo sett.</th>',
-            '<th class="text-right px-2 py-2 cursor-pointer" data-sortw="deltaW">Δ vs sett. prec.</th>',
-          '</tr></thead><tbody id="rowsW"></tbody></table>',
-        '</div></div>'
-      ].join('');})(),
-
-      // GRAFICI
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Grafico mensile (totale)</h3></div>',
-        '<div class="card-b"><canvas id="chartTot" style="width:100%"></canvas></div>',
-      '</div>',
-      '<div class="card"><div class="card-h"><h3 class="font-semibold">Andamento cliente (YTD)</h3></div>',
-        '<div class="card-b">',
-          '<div class="flex items-center gap-2 mb-3">',
-            '<select id="selClient" class="border rounded-xl px-3 py-2">', clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('') ,'</select>',
-            '<select id="yearYTD" class="border rounded-xl px-3 py-2">', years.map(y=>`<option ${y===defY?'selected':''}>${y}</option>`).join('') ,'</select>',
-          '</div>',
-          '<canvas id="chartClient" style="width:100%"></canvas>',
-        '</div>',
-      '</div>',
-    '</div>'
-  ].join('');
-
-  // ===== painters =====
-  function paintMonthly(){
-    const y=+document.getElementById('mYear').value, m=document.getElementById('mMonth').value;
-    const rows = clients.map(c=>monthlyRow(c,y,m)).sort((A,B)=>{
-      const k=sortM.key,d=sortM.dir;
-      if(k==='name')   return _cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
-      if(k==='goal')   return _cmp(A.goal,B.goal,d);
-      if(k==='amount') return _cmp(A.amount,B.amount,d);
-      if(k==='delta')  return _cmp(A.delta,B.delta,d);
-      if(k==='deltaY') return _cmp(A.deltaY,B.deltaY,d);
-      return 0;
-    }).map(r=>{
-      const pct = r.goal ? Math.min(100, Math.round(100*r.amount/r.goal)) : null;
-      const bar = `<div class="w-40 h-2 bg-slate-200 rounded-full overflow-hidden"><div style="width:${pct||0}%;height:100%" class="bg-blue-500"></div></div> ${pct!=null?(pct+'%'):'—'}`;
-      const cls = r.delta<0?'text-red-600':(r.delta>0?'text-emerald-600':'');
-      const clsY= r.deltaY<0?'text-red-600':(r.deltaY>0?'text-emerald-600':'');
-      return [
-        '<tr class="border-b">',
-          '<td class="px-2 py-2">',r.name,'</td>',
-          '<td class="px-2 py-2 text-right">', r.goal?_euro(r.goal):'—','</td>',
-          '<td class="px-2 py-2 text-right">', _euro(r.amount),'</td>',
-          '<td class="px-2 py-2">', bar ,'</td>',
-          '<td class="px-2 py-2 text-right ',cls,'">', (r.delta>0?'+':''), _euro(r.delta),' (',r.prev,')</td>',
-          '<td class="px-2 py-2 text-right ',clsY,'">', (r.deltaY>0?'+':''), _euro(r.deltaY),' (',r.prevYoY,')</td>',
-        '</tr>'
-      ].join('');
-    }).join('');
-    document.getElementById('rowsM').innerHTML = rows;
-    document.querySelectorAll('[data-sort]').forEach(th=>th.onclick=()=>{ const key=th.getAttribute('data-sort'); const dir=(sortM.key===key&&sortM.dir==='asc')?'desc':'asc'; sortM={key,dir}; lsSet('fattSort',sortM); paintMonthly(); });
-  }
-
-  function paintYearly(){
-    const Y=+document.getElementById('yYear').value;
-    const rows = clients.map(c=>yearlyTotals(c,Y)).sort((A,B)=>{
-      const k=sortY.key,d=sortY.dir;
-      if(k==='name')     return _cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
-      if(k==='goalY')    return _cmp(A.goalY,B.goalY,d);
-      if(k==='amountY')  return _cmp(A.amountY,B.amountY,d);
-      if(k==='deltaYG')  return _cmp(A.deltaYG,B.deltaYG,d);
-      if(k==='deltaYoY') return _cmp(A.deltaYoY,B.deltaYoY,d);
-      return 0;
-    }).map(r=>{
-      const clsG=r.deltaYG<0?'text-red-600':(r.deltaYG>0?'text-emerald-600':'');
-      const clsY=r.deltaYoY<0?'text-red-600':(r.deltaYoY>0?'text-emerald-600':'');
-      return [
-        '<tr class="border-b">',
-          '<td class="px-2 py-2">',r.name,'</td>',
-          '<td class="px-2 py-2 text-right">', r.goalY?_euro(r.goalY):'—','</td>',
-          '<td class="px-2 py-2 text-right">', _euro(r.amountY),'</td>',
-          '<td class="px-2 py-2 text-right ',clsG,'">', (r.deltaYG>0?'+':''), _euro(r.deltaYG),'</td>',
-          '<td class="px-2 py-2 text-right ',clsY,'">', (r.deltaYoY>0?'+':''), _euro(r.deltaYoY),'</td>',
-        '</tr>'
-      ].join('');
-    }).join('');
-    document.getElementById('rowsY').innerHTML = rows;
-    document.querySelectorAll('[data-sorty]').forEach(th=>th.onclick=()=>{ const key=th.getAttribute('data-sorty'); const dir=(sortY.key===key&&sortY.dir==='asc')?'desc':'asc'; sortY={key,dir}; lsSet('fattSortY',sortY); paintYearly(); });
-  }
-
-  function paintWeekly(){
-    const Y=+document.getElementById('wYear').value, W=+document.getElementById('wWeek').value;
-    const prevY=(W===1)?(Y-1):Y, prevW=(W===1)?52:(W-1);
-    const rows = clients.map(c=>{
-      const a=weekAmt(c.id,Y,W), p=weekAmt(c.id,prevY,prevW);
-      return {name:c.name, amount:a, deltaW:a-p};
-    }).sort((A,B)=>{ const k=sortW.key,d=sortW.dir; if(k==='name')return _cmp(A.name.toLowerCase(),B.name.toLowerCase(),d); if(k==='amount')return _cmp(A.amount,B.amount,d); if(k==='deltaW')return _cmp(A.deltaW,B.deltaW,d); return 0; })
-      .map(r=>{
-        const cls=r.deltaW<0?'text-red-600':(r.deltaW>0?'text-emerald-600':'');
-        return ['<tr class="border-b">','<td class="px-2 py-2">',r.name,'</td>','<td class="px-2 py-2 text-right">',_euro(r.amount),'</td>','<td class="px-2 py-2 text-right ',cls,'">',(r.deltaW>0?'+':''),_euro(r.deltaW),'</td>','</tr>'].join('');
-      }).join('');
-    document.getElementById('rowsW').innerHTML = rows;
-    document.querySelectorAll('[data-sortw]').forEach(th=>th.onclick=()=>{ const key=th.getAttribute('data-sortw'); const dir=(sortW.key===key&&sortW.dir==='asc')?'desc':'asc'; sortW={key,dir}; lsSet('fattSortW',sortW); paintWeekly(); });
-  }
-
-  function paintCharts(){
-    // Totale 12 mesi
-    const months=[]; const now=new Date();
-    for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); months.push(d.toISOString().slice(0,7)); }
-    const totals=months.map(m=> sales.filter(s=>s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
-    _draw('chartTot', months, totals);
-    // Client YTD
-    const id=document.getElementById('selClient').value, Y=+document.getElementById('yearYTD').value;
-    const labs=[...Array(12)].map((_,i)=>`${Y}-${String(i+1).padStart(2,'0')}`);
-    const ser=labs.map(m=> sales.filter(s=>s.clientId===id && s.month===m).reduce((a,b)=>a+Number(b.amount||0),0));
-    _draw('chartClient', labs, ser);
-  }
-
-  // init
-  paintMonthly(); paintYearly(); paintWeekly(); paintCharts();
-  // listeners
-  document.getElementById('mYear').addEventListener('change', paintMonthly);
-  document.getElementById('mMonth').addEventListener('change', paintMonthly);
-  document.getElementById('yYear').addEventListener('change', paintYearly);
-  document.getElementById('wYear').addEventListener('change', paintWeekly);
-  document.getElementById('wWeek').addEventListener('change', paintWeekly);
-  document.getElementById('selClient').addEventListener('change', paintCharts);
-  document.getElementById('yearYTD').addEventListener('change', paintCharts);
-
-  // export CSV cliente×mese
-  document.getElementById('exportCSV').addEventListener('click', ()=>{
-    const rows=[['client_code','client_name','month','amount']];
-    const mapName=Object.fromEntries(clients.map(c=>[c.id,c.name]));
-    const mapCode=Object.fromEntries(clients.map(c=>[c.id,c.code||'']));
-    sales.forEach(s=> rows.push([mapCode[s.clientId]||'', mapName[s.clientId]||'', s.month, String(s.amount||0)]));
-    const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace(/"/g,'""')+'"'):v).join(',')).join('\r\n');
-    const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clienti_mese.csv'; a.click();
-  });
-  // export CSV annuo
-  document.getElementById('exportCSVY').addEventListener('click', ()=>{
-    const Y=+document.getElementById('yYear').value;
-    const rows=[['client_code','client_name','year','amount','annual_goal','delta_vs_goal','delta_yoy']];
-    const mapName=Object.fromEntries(clients.map(c=>[c.id,c.name]));
-    const mapCode=Object.fromEntries(clients.map(c=>[c.id,c.code||'']));
-    clients.forEach(c=>{ const t=yearlyTotals(c,Y); rows.push([mapCode[c.id]||'', mapName[c.id]||'', String(Y), String(t.amountY||0), String(t.goalY||0), String(t.deltaYG||0), String(t.deltaYoY||0)]); });
-    const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"'+String(v).replace(/"/g,'""')+'"'):v).join(',')).join('\r\n');
-    const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='fatturato_annuale_'+Y+'.csv'; a.click();
-  });
-  // stampa/PDF annuale
-  document.getElementById('printY').addEventListener('click', ()=>{
-    const node=document.getElementById('cardY'); const w=window.open('','_blank');
-    w.document.write(`<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Riepilogo annuale</title>
-      <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;color:#0f172a}
-      h1{font-size:18px;margin:0 0 12px}table{width:100%;border-collapse:collapse;font-size:12px}
-      th,td{border:1px solid #e2e8f0;padding:6px 8px;text-align:right}th{text-align:left;background:#f1f5f9;color:#475569}
-      td:first-child,th:first-child{text-align:left}</style></head><body>
-      <h1>Riepilogo annuale</h1>${node.querySelector('table')?.outerHTML || node.innerHTML}</body></html>`);
-    w.document.close(); w.focus(); w.print();
-  });
-
-  // (Import CSV rimane quello già presente nella tua versione; se serve te lo riscrivo dopo)
-}
-
-    // ——— Agenda ———
-    function renderAgenda(root){
+    // ——— Agenda (con editTour annidata) ———
+function renderAgenda(root){
   let tours = getTours();
 
   function dueCandidates(prov){
-    const s=getSettings(), now=today();
+    const s = getSettings(), now = today();
     return getClients().filter(c =>
-      (!prov || c.prov===prov) &&
-      (!c.lastVisitDate || new Date(addDays(c.lastVisitDate,tierToFreq(c.tier||'standard',s))) <= new Date(addDays(now,7)))
+      (!prov || c.prov === prov) &&
+      (!c.lastVisitDate ||
+        new Date(addDays(c.lastVisitDate, tierToFreq(c.tier||'standard', s))) <=
+        new Date(addDays(now, 7))
+      )
     );
   }
-  function googleMapsLink(origin, stops){
-    const enc=s=>encodeURIComponent(s||'');
-    if(!stops.length) return '#';
-    const s=getSettings();
-    const originQ=enc(origin || s.baseCity || 'Padova');
-    const dest=enc((stops[stops.length-1].address||stops[stops.length-1].city||'').trim());
-    const way=stops.slice(0,Math.max(0,stops.length-1)).map(x=>enc((x.address||x.city||'').trim())).join('|');
-    let url='https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+originQ+'&destination='+dest;
-    if(way) url+='&waypoints='+way;
+
+  // URL Google Maps (nessuna variabile 's' fantasma)
+  function gmapsUrl(origin, stops){
+    const enc  = v => encodeURIComponent(v||'');
+    const s    = getSettings();
+    const orig = origin || s.baseCity || 'Padova';
+    const arr  = (stops||[]).map(st => getClients().find(c=>c.id===st.clientId) || {});
+    if(!arr.length) return '#';
+    const dest = enc((arr[arr.length-1].address || arr[arr.length-1].city || '').trim());
+    const way  = arr.slice(0, Math.max(0, arr.length-1))
+                    .map(x => enc((x.address||x.city||'').trim()))
+                    .join('|');
+    let url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+enc(orig)+'&destination='+dest;
+    if(way) url += '&waypoints='+way;
     return url;
   }
 
   function paint(){
-    const provOpts = Object.values(TRIVENETO).flat()
-      .map(p => `<option value="${p}">${p}</option>`).join('');
+    const provOpts = Object.values(TRIVENETO).flat().map(p=>`<option value="${p}">${p}</option>`).join('');
 
     root.innerHTML = `
       <div class="space-y-4">
@@ -1225,8 +1171,10 @@ function renderFatturati(root){
     // Lista giri
     const list = root.querySelector('#toursList');
     list.innerHTML = tours.length ? tours.map(t => {
-      const stops=(t.stops||[]).map((st,i)=> (i+1)+'. '+(getClients().find(c=>c.id===st.clientId)||{}).name).join('<br>');
-      const url=googleMapsLink(t.origin || getSettings().baseCity, (t.stops||[]).map(st=>getClients().find(c=>c.id===st.clientId)||{}));
+      const stopsTxt = (t.stops||[])
+        .map((st,i)=> (i+1)+'. '+((getClients().find(c=>c.id===st.clientId)||{}).name||st.clientId))
+        .join('<br>');
+      const url = gmapsUrl(t.origin, t.stops);
       return `
         <div class="border rounded-xl p-3 mb-3">
           <div class="flex items-center justify-between">
@@ -1240,7 +1188,7 @@ function renderFatturati(root){
               <button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="${t.id}">Elimina</button>
             </div>
           </div>
-          <div class="mt-2 text-sm">${stops || '—'}</div>
+          <div class="mt-2 text-sm">${stopsTxt || '—'}</div>
         </div>`;
     }).join('') : '<div class="text-sm text-slate-600">Nessun giro salvato</div>';
 
@@ -1253,7 +1201,7 @@ function renderFatturati(root){
       const id=b.getAttribute('data-edit'); editTour(id);
     }));
 
-    // Submit nuovo giro
+    // Nuovo giro
     root.querySelector('#fTour').addEventListener('submit', e=>{
       e.preventDefault();
       const data=Object.fromEntries(new FormData(e.target).entries());
@@ -1276,101 +1224,131 @@ function renderFatturati(root){
       alert('Giro creato con '+firstGroup.length+' tappe. Partenza '+t.origin+' ore '+t.startTime);
     });
   }
-      function editTour(id){
-        const t=(getTours().find(x=>x.id===id)); if(!t){ paint(); return; }
-        const prov=t.prov||''; const candidates=getClients().filter(c=>!prov || c.prov===prov);
-        const root=document.getElementById('view');
-        const provOpts = Object.values(TRIVENETO).flat()
-          .map(p=>'<option value="'+p+'">'+p+'</option>').join('');
-        root.innerHTML=[
-          '<div class=\"space-y-4\">',
-            '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Modifica giro — ',t.name,'</h3></div>',
-            '<div class=\"card-b grid grid-cols-1 md:grid-cols-2 gap-4\">',
-              '<div>',
-                '<div class=\"font-medium mb-2\">Clienti candidati ',prov?('('+prov+')'):'' ,'</div>',
-                '<div class=\"border rounded-xl p-2 h-80 overflow-auto\" id=\"cand\">', candidates.map(c=>'<div class=\"flex items-center justify-between border-b py-1\"><div>'+c.name+' ('+(c.prov||'')+')</div><button class=\"btn\" data-add=\"'+c.id+'\">Aggiungi</button></div>').join('') ,'</div>',
-              '</div>',
-              '<div>',
-                '<div class=\"font-medium mb-2\">Stop del giro (riordina)</div>',
-                '<div class=\"border rounded-xl p-2 h-80 overflow-auto\" id=\"stops\">', (t.stops||[]).map((s,i)=>{
-                  const name=(getClients().find(c=>c.id===s.clientId)||{}).name||s.clientId;
-                  return '<div class=\"flex items-center justify-between border-b py-1\"><div>'+(i+1)+'. '+name+'</div><div class=\"space-x-1\"><button class=\"btn\" data-up=\"'+i+'\">↑</button><button class=\"btn\" data-down=\"'+i+'\">↓</button><button class=\"btn text-red-600 border-red-300 hover:bg-red-50\" data-rm=\"'+i+'\">✕</button></div></div>';
-                }).join('') ,'</div>',
-              '</div>',
-            '</div>',
-            '<div class=\"card-b text-right\">',
-              '<button class=\"btn\" id=\"ok\">Salva</button> ',
-              '<a class=\"btn\" id=\"gmap\" target=\"_blank\">Apri in Google Maps</a> ',
-              '<button class=\"btn-primary\" id=\"finish\">Segna visite effettuate</button>',
-            '</div>',
-          '</div>'
-        ].join('');
 
-        const cand=document.getElementById('cand'); const stopsBox=document.getElementById('stops');
-        function googleMapsLink(origin, stops){
-          const enc = s=>encodeURIComponent(s||'');
-          if(!stops.length) return '#';
-          const originQ = enc((origin || s.baseCity || 'Padova'));
-          const dest = enc((stops[stops.length-1].address||stops[stops.length-1].city||'').trim());
-          const way = stops.slice(0, Math.max(0,stops.length-1)).map(x=> enc((x.address||x.city||'').trim()) ).join('|');
-          let url='https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+originQ+'&destination='+dest;
-          if(way) url+='&waypoints='+way;
-          return url;
-        }
-        function repaintStops(){
-          stopsBox.innerHTML=(t.stops||[]).map((s,i)=>{
-            const name=(getClients().find(c=>c.id===s.clientId)||{}).name||s.clientId;
-            return '<div class=\"flex items-center justify-between border-b py-1\"><div>'+(i+1)+'. '+name+'</div><div class=\"space-x-1\"><button class=\"btn\" data-up=\"'+i+'\">↑</button><button class=\"btn\" data-down=\"'+i+'\">↓</button><button class=\"btn text-red-600 border-red-300 hover:bg-red-50\" data-rm=\"'+i+'\">✕</button></div></div>';
-          }).join('');
-          const url=googleMapsLink(t.origin || getSettings().baseCity, (t.stops||[]).map(st=>getClients().find(c=>c.id===st.clientId)||{}));
-          const g=document.getElementById('gmap'); g.href=url;
-          stopsBox.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{ const i=Number(b.getAttribute('data-rm')); t.stops.splice(i,1); setTours([...getTours().filter(x=>x.id!==id), t]); repaintStops(); }));
-          stopsBox.querySelectorAll('[data-up]').forEach(b=>b.addEventListener('click',()=>{ const i=Number(b.getAttribute('data-up')); if(i>0){ const tmp=t.stops[i-1]; t.stops[i-1]=t.stops[i]; t.stops[i]=tmp; setTours([...getTours().filter(x=>x.id!==id), t]); repaintStops(); } }));
-          stopsBox.querySelectorAll('[data-down]').forEach(b=>b.addEventListener('click',()=>{ const i=Number(b.getAttribute('data-down')); if(i<t.stops.length-1){ const tmp=t.stops[i+1]; t.stops[i+1]=t.stops[i]; t.stops[i]=tmp; setTours([...getTours().filter(x=>x.id!==id), t]); repaintStops(); } }));
-        }
+  // ====== EDIT TOUR (annidata) ======
+  function editTour(id){
+    const t = getTours().find(x=>x.id===id);
+    if(!t){ paint(); return; }
+
+    const candidates = getClients().filter(c=>!t.prov || c.prov===t.prov);
+    const container = document.getElementById('view');
+
+    container.innerHTML = [
+      '<div class="space-y-4">',
+        `<div class="card"><div class="card-h"><h3 class="font-semibold">Modifica giro — ${t.name}</h3></div>`,
+        '<div class="card-b grid grid-cols-1 md:grid-cols-2 gap-4">',
+          '<div>',
+            `<div class="font-medium mb-2">Clienti candidati ${t.prov?('('+t.prov+')'):''}</div>`,
+            `<div class="border rounded-xl p-2 h-80 overflow-auto" id="cand">`,
+              candidates.map(c=>`<div class="flex items-center justify-between border-b py-1"><div>${c.name} (${c.prov||''})</div><button class="btn" data-add="${c.id}">Aggiungi</button></div>`).join(''),
+            '</div>',
+          '</div>',
+          '<div>',
+            '<div class="font-medium mb-2">Stop del giro (riordina)</div>',
+            '<div class="border rounded-xl p-2 h-80 overflow-auto" id="stops"></div>',
+          '</div>',
+        '</div>',
+        '<div class="card-b text-right">',
+          '<button class="btn" id="ok">Salva</button> ',
+          '<a class="btn" id="gmap" target="_blank">Apri in Google Maps</a> ',
+          '<button class="btn-primary" id="finish">Segna visite effettuate</button>',
+        '</div>',
+      '</div>'
+    ].join('');
+
+    const stopsBox = document.getElementById('stops');
+
+    function repaintStops(){
+      stopsBox.innerHTML = (t.stops||[]).map((s,i)=>{
+        const name=(getClients().find(c=>c.id===s.clientId)||{}).name||s.clientId;
+        return `<div class="flex items-center justify-between border-b py-1">
+          <div>${i+1}. ${name}</div>
+          <div class="space-x-1">
+            <button class="btn" data-up="${i}">↑</button>
+            <button class="btn" data-down="${i}">↓</button>
+            <button class="btn text-red-600 border-red-300 hover:bg-red-50" data-rm="${i}">✕</button>
+          </div>
+        </div>`;
+      }).join('');
+
+      const g = document.getElementById('gmap');
+      g.href = gmapsUrl(t.origin, t.stops);
+
+      stopsBox.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{
+        const i=Number(b.getAttribute('data-rm'));
+        t.stops.splice(i,1);
+        setTours([...getTours().filter(x=>x.id!==id), t]);
         repaintStops();
-
-        cand.querySelectorAll('[data-add]').forEach(b=>b.addEventListener('click',()=>{ const cid=b.getAttribute('data-add'); t.stops.push({clientId:cid}); setTours([...getTours().filter(x=>x.id!==id), t]); repaintStops(); }));
-        document.getElementById('ok').addEventListener('click',()=>{ alert('Giro salvato'); renderAgenda(document.getElementById('view')); });
-        document.getElementById('finish').addEventListener('click',()=>{
-          const visits=getVisits(); const s=getSettings();
-          (t.stops||[]).forEach((st,idx)=>{
-            const v={id:nextId('V'), date:t.date, clientId:st.clientId, reason:'Giro: '+t.name, esito:'Positivo', notes:''};
-            visits.push(v);
-            const all=getClients(); const c=all.find(x=>x.id===st.clientId); if(c){ const next=addDays(t.date,tierToFreq(c.tier||'standard',s)); c.lastVisitDate=t.date; c.nextVisitDate=next; setClients(all); }
-          });
-          setVisits(visits); alert('Visite segnate e prossime date aggiornate'); renderAgenda(document.getElementById('view'));
-        });
-      }
-      paint();
+      }));
+      stopsBox.querySelectorAll('[data-up]').forEach(b=>b.addEventListener('click',()=>{
+        const i=Number(b.getAttribute('data-up'));
+        if(i>0){ const tmp=t.stops[i-1]; t.stops[i-1]=t.stops[i]; t.stops[i]=tmp;
+          setTours([...getTours().filter(x=>x.id!==id), t]); repaintStops(); }
+      }));
+      stopsBox.querySelectorAll('[data-down]').forEach(b=>b.addEventListener('click',()=>{
+        const i=Number(b.getAttribute('data-down'));
+        if(i<t.stops.length-1){ const tmp=t.stops[i+1]; t.stops[i+1]=t.stops[i]; t.stops[i]=tmp;
+          setTours([...getTours().filter(x=>x.id!==id), t]); repaintStops(); }
+      }));
     }
+    repaintStops();
+
+    document.getElementById('cand').querySelectorAll('[data-add]').forEach(b=>b.addEventListener('click',()=>{
+      const cid=b.getAttribute('data-add');
+      t.stops.push({clientId:cid});
+      setTours([...getTours().filter(x=>x.id!==id), t]);
+      repaintStops();
+    }));
+
+    document.getElementById('ok').addEventListener('click',()=>{
+      alert('Giro salvato'); renderAgenda(document.getElementById('view'));
+    });
+
+    document.getElementById('finish').addEventListener('click',()=>{
+      const visits = getVisits();
+      const s = getSettings();
+      (t.stops||[]).forEach(st=>{
+        const v={id:nextId('V'), date:t.date, clientId:st.clientId, reason:'Giro: '+t.name, esito:'Positivo', notes:''};
+        visits.push(v);
+        const all=getClients(); const c=all.find(x=>x.id===st.clientId);
+        if(c){ const next=addDays(t.date, tierToFreq(c.tier||'standard', s)); c.lastVisitDate=t.date; c.nextVisitDate=next; setClients(all); }
+      });
+      setVisits(visits);
+      alert('Visite segnate e prossime date aggiornate');
+      renderAgenda(document.getElementById('view'));
+    });
+  }
+
+  // Prima pittura
+  paint();
+}
 
     // ——— Impostazioni + Firebase ———
     function renderImpostazioni(root){
       let s=getSettings(); const fb=getFB();
       root.innerHTML=[
-        '<div class=\"grid grid-cols-1 md:grid-cols-2 gap-4\">',
-          '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Dati agenzia</h3></div>',
-            '<div class=\"card-b grid grid-cols-1 gap-3\">',
-              '<input class=\"border rounded-xl px-3 py-2\" id=\"agencyName\" value=\"',(s.agencyName||''),'\" placeholder=\"Nome Agenzia\">',
-              '<input class=\"border rounded-xl px-3 py-2\" id=\"agentName\" value=\"',(s.agentName||''),'\" placeholder=\"Nome Agente\">',
-              '<input class=\"border rounded-xl px-3 py-2\" id=\"baseCity\" value=\"',(s.baseCity||''),'\" placeholder=\"Città di partenza (base)\">',
-              '<input class=\"border rounded-xl px-3 py-2\" id=\"annualGoal\" type=\"number\" value=\"',(s.annualGoal||0),'\" placeholder=\"Obiettivo annuo\">',
-              '<div class=\"text-right\"><button id=\"saveA\" class=\"btn-primary\">Salva</button></div>',
+        '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Dati agenzia</h3></div>',
+            '<div class="card-b grid grid-cols-1 gap-3">',
+              '<input class="border rounded-xl px-3 py-2" id="agencyName" value="',(s.agencyName||''),'" placeholder="Nome Agenzia">',
+              '<input class="border rounded-xl px-3 py-2" id="agentName" value="',(s.agentName||''),'" placeholder="Nome Agente">',
+              '<input class="border rounded-xl px-3 py-2" id="baseCity" value="',(s.baseCity||''),'" placeholder="Città di partenza (base)">',
+              '<input class="border rounded-xl px-3 py-2" id="annualGoal" type="number" value="',(s.annualGoal||0),'" placeholder="Obiettivo annuo">',
+              '<div class="text-right"><button id="saveA" class="btn-primary">Salva</button></div>',
             '</div></div>',
-          '<div class=\"card\"><div class=\"card-h\"><h3 class=\"font-semibold\">Frequenza visite (giorni)</h3></div>',
-            '<div class=\"card-b grid grid-cols-1 md:grid-cols-3 gap-3\">',
-              '<label class=\"text-sm\">Standard<input class=\"border rounded-xl px-3 py-2\" type=\"number\" id=\"freqStandard\" value=\"',(s.freqStandard||90),'\" ></label>',
-              '<label class=\"text-sm\">Importante<input class=\"border rounded-xl px-3 py-2\" type=\"number\" id=\"freqImportant\" value=\"',(s.freqImportant||30),'\" ></label>',
-              '<label class=\"text-sm\">Nuovo<input class=\"border rounded-xl px-3 py-2\" type=\"number\" id=\"freqNew\" value=\"',(s.freqNew||21),'\" ></label>',
+          '<div class="card"><div class="card-h"><h3 class="font-semibold">Frequenza visite (giorni)</h3></div>',
+            '<div class="card-b grid grid-cols-1 md:grid-cols-3 gap-3">',
+              '<label class="text-sm">Standard<input class="border rounded-xl px-3 py-2" type="number" id="freqStandard" value="',(s.freqStandard||90),'" ></label>',
+              '<label class="text-sm">Importante<input class="border rounded-xl px-3 py-2" type="number" id="freqImportant" value="',(s.freqImportant||30),'" ></label>',
+              '<label class="text-sm">Nuovo<input class="border rounded-xl px-3 py-2" type="number" id="freqNew" value="',(s.freqNew||21),'" ></label>',
             '</div>',
-            '<div class=\"card-b pt-0 text-right\"><button id=\"saveF\" class=\"btn-primary\">Salva frequenze</button></div>',
+            '<div class="card-b pt-0 text-right"><button id="saveF" class="btn-primary">Salva frequenze</button></div>',
           '</div>',
-          '<div class=\"card md:col-span-2\"><div class=\"card-h\"><h3 class=\"font-semibold\">Sincronizzazione (Firebase)</h3></div>',
-            '<div class=\"card-b grid grid-cols-1 gap-3\">',
-              '<label class=\"text-sm\">Agent ID (univoco)<input class=\"border rounded-xl px-3 py-2\" id=\"fbAgent\" value=\"',(fb.agentId||''),'\" placeholder=\"es. riccardo-masetto-2025-privato\"></label>',
-              '<textarea id=\"fbConfig\" class=\"border rounded-xl px-3 py-2 w-full\" placeholder=\"Incolla qui il JSON di config Firebase\">',(fb.config?JSON.stringify(fb.config):''),'</textarea>',
-              '<div class=\"flex gap-2 items-center flex-wrap\"><label class=\"flex items-center gap-2\"><input type=\"checkbox\" id=\"fbEnable\" ',(fb.enabled?'checked':''),' > Abilita</label><button id=\"fbConnect\" class=\"btn\">Connetti</button><button id=\"fbTest\" class=\"btn\">Test connessione</button><button id=\"fbUp\" class=\"btn\">Upload dati</button><button id=\"fbDown\" class=\"btn\">Scarica dati</button></div>',
+          '<div class="card md:col-span-2"><div class="card-h"><h3 class="font-semibold">Sincronizzazione (Firebase)</h3></div>',
+            '<div class="card-b grid grid-cols-1 gap-3">',
+              '<label class="text-sm">Agent ID (univoco)<input class="border rounded-xl px-3 py-2" id="fbAgent" value="',(fb.agentId||''),'" placeholder="es. riccardo-masetto-2025-privato"></label>',
+              '<textarea id="fbConfig" class="border rounded-xl px-3 py-2 w-full" placeholder="Incolla qui il JSON di config Firebase">',(fb.config?JSON.stringify(fb.config):''),'</textarea>',
+              '<div class="flex gap-2 items-center flex-wrap"><label class="flex items-center gap-2"><input type="checkbox" id="fbEnable" ',(fb.enabled?'checked':''),' > Abilita</label><button id="fbConnect" class="btn">Connetti</button><button id="fbTest" class="btn">Test connessione</button><button id="fbUp" class="btn">Upload dati</button><button id="fbDown" class="btn">Scarica dati</button></div>',
               '<div class="space-y-2">',
                 '<div class="text-sm font-medium">Autenticazione</div>',
                 '<label class="flex items-center gap-2">',
@@ -1384,14 +1362,14 @@ function renderFatturati(root){
                   '<input id="fbPass" type="password" class="border rounded-xl px-3 py-2" placeholder="Password (non viene salvata)">',
                 '</div>',
               '</div>',              
-              '<div id=\"fbStatus\" class=\"text-xs text-slate-500\">Stato: non connesso</div>',
+              '<div id="fbStatus" class="text-xs text-slate-500">Stato: non connesso</div>',
             '</div>',
           '</div>',
-          '<div class=\"card md:col-span-2\"><div class=\"card-h\"><h3 class=\"font-semibold\">Backup & Import</h3></div>',
-            '<div class=\"card-b flex flex-col gap-2\">',
-              '<button id=\"export\" class=\"btn-primary\">Scarica backup JSON</button>',
-              '<label class=\"block\"><span class=\"text-sm text-slate-600\">Importa backup JSON</span><input type=\"file\" accept=\"application/json\" id=\"import\" class=\"block mt-1\"></label>',
-              '<button id=\"wipe\" class=\"btn border-red-300 text-red-600 hover:bg-red-50\">Svuota tutti i dati</button>',
+          '<div class="card md:col-span-2"><div class="card-h"><h3 class="font-semibold">Backup & Import</h3></div>',
+            '<div class="card-b flex flex-col gap-2">',
+              '<button id="export" class="btn-primary">Scarica backup JSON</button>',
+              '<label class="block"><span class="text-sm text-slate-600">Importa backup JSON</span><input type="file" accept="application/json" id="import" class="block mt-1"></label>',
+              '<button id="wipe" class="btn border-red-300 text-red-600 hover:bg-red-50">Svuota tutti i dati</button>',
             '</div>',
           '</div>',
         '</div>'
@@ -1406,99 +1384,98 @@ function renderFatturati(root){
       document.getElementById('wipe').addEventListener('click',()=>{ if(confirm('Sicuro?')){ ['settings','clients','visits','promos','sales','salesW','tours','firebase','counters'].forEach(k=>localStorage.removeItem(k)); location.reload(); } });
 
       function saveFB(){
-  const enabled=document.getElementById('fbEnable').checked;
-  const agentId=val('#fbAgent');
-  let conf=null;
-  try{ conf=JSON.parse(val('#fbConfig')||'null'); }catch{ alert('Config non è un JSON valido'); return; }
-  const authMode = (root.querySelector('input[name="fbAuthMode"]:checked')?.value)||'anon';
-  const email = (document.getElementById('fbEmail')?.value)||'';
-  setFB({enabled, agentId, config:conf, authMode, email});
-  document.getElementById('fbStatus').textContent='Stato: impostazioni salvate';
-}
+        const enabled=document.getElementById('fbEnable').checked;
+        const agentId=val('#fbAgent');
+        let conf=null;
+        try{ conf=JSON.parse(val('#fbConfig')||'null'); }catch{ alert('Config non è un JSON valido'); return; }
+        const authMode = (root.querySelector('input[name="fbAuthMode"]:checked')?.value)||'anon';
+        const email = (document.getElementById('fbEmail')?.value)||'';
+        setFB({enabled, agentId, config:conf, authMode, email});
+        document.getElementById('fbStatus').textContent='Stato: impostazioni salvate';
+      }
 
-async function fbConnect(){
-  try{
-    document.getElementById('fbStatus').textContent='Stato: connessione in corso...';
-    const ok = await ensureFirebaseConnected();
-    if(!ok){ alert('Compila agent id, config e abilita'); document.getElementById('fbStatus').textContent='Stato: manca configurazione'; return; }
-    const uid = window._fbAuth.currentUser?.uid || '(anonimo)';
-    document.getElementById('fbStatus').textContent='Stato: connesso (UID '+uid+')';
-    alert('Connesso (Anonymous)');
-  }catch(e){
-    console.error(e);
-    alert('Errore connessione: '+(e?.message||e));
-    document.getElementById('fbStatus').textContent='Stato: errore connessione';
-  }
-}
+      async function fbConnect(){
+        try{
+          document.getElementById('fbStatus').textContent='Stato: connessione in corso...';
+          const ok = await ensureFirebaseConnected();
+          if(!ok){ alert('Compila agent id, config e abilita'); document.getElementById('fbStatus').textContent='Stato: manca configurazione'; return; }
+          const uid = window._fbAuth.currentUser?.uid || '(anonimo)';
+          document.getElementById('fbStatus').textContent='Stato: connesso (UID '+uid+')';
+          alert('Connesso (Anonymous)');
+        }catch(e){
+          console.error(e);
+          alert('Errore connessione: '+(e?.message||e));
+          document.getElementById('fbStatus').textContent='Stato: errore connessione';
+        }
+      }
 
-async function fbTest(){
-  try{
-    const ok = await ensureFirebaseConnected();
-    if(!ok){ alert('Connettiti prima'); return; }
-    const fb=getFB();
-    document.getElementById('fbStatus').textContent='Stato: test in corso...';
-    const ref=window._fbDB.collection('agents').doc(fb.agentId).collection('ping').doc('test');
-    await ref.set({at:new Date().toISOString(), ua:navigator.userAgent});
-    const snap=await ref.get();
-    if(snap.exists){
-      alert('Test OK: lettura/scrittura Firestore riuscita.');
-      document.getElementById('fbStatus').textContent='Stato: test OK';
-    } else {
-      alert('Test fallito: documento non trovato.');
-      document.getElementById('fbStatus').textContent='Stato: test fallito';
-    }
-  }catch(e){
-    console.error(e);
-    alert('Test errore: '+(e?.message||e));
-    document.getElementById('fbStatus').textContent='Stato: errore test';
-  }
-}
-
+      async function fbTest(){
+        try{
+          const ok = await ensureFirebaseConnected();
+          if(!ok){ alert('Connettiti prima'); return; }
+          const fb=getFB();
+          document.getElementById('fbStatus').textContent='Stato: test in corso...';
+          const ref=window._fbDB.collection('agents').doc(fb.agentId).collection('ping').doc('test');
+          await ref.set({at:new Date().toISOString(), ua:navigator.userAgent});
+          const snap=await ref.get();
+          if(snap.exists){
+            alert('Test OK: lettura/scrittura Firestore riuscita.');
+            document.getElementById('fbStatus').textContent='Stato: test OK';
+          } else {
+            alert('Test fallito: documento non trovato.');
+            document.getElementById('fbStatus').textContent='Stato: test fallito';
+          }
+        }catch(e){
+          console.error(e);
+          alert('Test errore: '+(e?.message||e));
+          document.getElementById('fbStatus').textContent='Stato: errore test';
+        }
+      }
 
       async function fbUpload(){
-  try{
-    const ok = await ensureFirebaseConnected();
-    if(!ok){ alert('Connettiti prima'); return; }
-    document.getElementById('fbStatus').textContent='Stato: upload in corso...';
-    const fb=getFB();
-    const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
-    const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),salesW:getSalesW(),tours:getTours(),cPromos:getCPromos(),ts:new Date().toISOString()};
-    await docRef.set(payload);
-    setSync({lastSyncISO:new Date().toISOString()});
-    document.getElementById('fbStatus').textContent='Stato: upload completato';
-    alert('Upload completato');
-  }catch(e){
-    console.error(e);
-    alert('Errore upload: '+(e?.message||e));
-    document.getElementById('fbStatus').textContent='Stato: errore upload';
-  }
-}
+        try{
+          const ok = await ensureFirebaseConnected();
+          if(!ok){ alert('Connettiti prima'); return; }
+          document.getElementById('fbStatus').textContent='Stato: upload in corso...';
+          const fb=getFB();
+          const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
+          const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),salesW:getSalesW(),tours:DEFAULT_SETTINGS(),cPromos:getCPromos(),ts:new Date().toISOString()};
+          await docRef.set(payload);
+          setSync({lastSyncISO:new Date().toISOString()});
+          document.getElementById('fbStatus').textContent='Stato: upload completato';
+          alert('Upload completato');
+        }catch(e){
+          console.error(e);
+          alert('Errore upload: '+(e?.message||e));
+          document.getElementById('fbStatus').textContent='Stato: errore upload';
+        }
+      }
 
       async function fbDownload(){
-  try{
-    const ok = await ensureFirebaseConnected();
-    if(!ok){ alert('Connettiti prima'); return; }
-    document.getElementById('fbStatus').textContent='Stato: download in corso...';
-    const fb=getFB();
-    const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
-    const snap=await docRef.get();
-    if(!snap.exists){
-      document.getElementById('fbStatus').textContent='Stato: nessun dato sul cloud';
-      alert('Nessun dato sul cloud');
-      return;
-    }
-    const data=snap.data();
-    ['settings','clients','visits','promos','sales','salesW','tours','cPromos'].forEach(k=>{ if(data[k]!=null) lsSet(k,data[k]); });
-    if(data.ts){ setSync({lastSyncISO:data.ts}); }
-    document.getElementById('fbStatus').textContent='Stato: dati scaricati ('+ new Date().toLocaleString('it-IT') +')';
-    alert('Scaricato. Ricarico l’app per applicare i dati.');
-    location.reload(); // forza reload anche in PWA
-  }catch(e){
-    console.error(e);
-    alert('Errore download: '+(e?.message||e));
-    document.getElementById('fbStatus').textContent='Stato: errore download';
-  }
-}
+        try{
+          const ok = await ensureFirebaseConnected();
+          if(!ok){ alert('Connettiti prima'); return; }
+          document.getElementById('fbStatus').textContent='Stato: download in corso...';
+          const fb=getFB();
+          const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
+          const snap=await docRef.get();
+          if(!snap.exists){
+            document.getElementById('fbStatus').textContent='Stato: nessun dato sul cloud';
+            alert('Nessun dato sul cloud');
+            return;
+          }
+          const data=snap.data();
+          ['settings','clients','visits','promos','sales','salesW','tours','cPromos'].forEach(k=>{ if(data[k]!=null) lsSet(k,data[k]); });
+          if(data.ts){ setSync({lastSyncISO:data.ts}); }
+          document.getElementById('fbStatus').textContent='Stato: dati scaricati ('+ new Date().toLocaleString('it-IT') +')';
+          alert('Scaricato. Ricarico l’app per applicare i dati.');
+          location.reload();
+        }catch(e){
+          console.error(e);
+          alert('Errore download: '+(e?.message||e));
+          document.getElementById('fbStatus').textContent='Stato: errore download';
+        }
+      }
 
       document.getElementById('fbEnable').addEventListener('change',saveFB);
       document.getElementById('fbAgent').addEventListener('change',saveFB);
@@ -1520,6 +1497,15 @@ async function fbTest(){
     }
 
     // ——— Bootstrap ———
+    window.addEventListener('error', e=>{
+  console.error('GlobalError:', e.error || e.message);
+  alert('Errore: '+(e.message||'')+'\nControlla la console (F12) per i dettagli.');
+});
+window.addEventListener('unhandledrejection', e=>{
+  console.error('UnhandledRejection:', e.reason);
+  alert('Errore asincrono: '+(e.reason?.message||e.reason||''));
+});
+
     render();
   </script>
 </body>
