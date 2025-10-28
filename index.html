@@ -1105,7 +1105,6 @@ async function ensureFirebaseConnected(){
     // stato sort annuo
 let sortY = lsGet('fattSortY', {key:'amountY', dir:'desc'});
 const saveSortY = (s)=>{ sortY=s; lsSet('fattSortY', s); };
-const cmp=(a,b,dir)=> dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0));
 
 function yearTotalsForClient(c, Y){
   const months = [...Array(12)].map((_,i)=> Y+'-'+String(i+1).padStart(2,'0'));
