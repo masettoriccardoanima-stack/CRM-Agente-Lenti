@@ -329,44 +329,54 @@ async function ensureFirebaseConnected(){
   }
 
   function row(c){
-    const overdue = c.lastVisitDate && new Date(addDays(c.lastVisitDate, tierToFreq(c.tier||'standard',s))) < new Date(today());
-    const tierSel = '<select class="border rounded-xl px-2 py-1 text-sm" data-tier="'+c.id+'">'+
-      tiers.map(t=>'<option value="'+t+'" '+(t===(c.tier||'standard')?'selected':'')+'>'+t+'</option>').join('')+
-    '</select>';
+  const tiers=['nuovo','standard','importante'];
+  const s=getSettings();
+  const overdue = c.lastVisitDate && new Date(addDays(c.lastVisitDate, tierToFreq(c.tier||'standard',s))) < new Date(today());
+  const tierSel = '<select class="border rounded-xl px-2 py-1 text-sm" data-tier="'+c.id+'">'+
+    tiers.map(t=>'<option value="'+t+'" '+(t===(c.tier||'standard')?'selected':'')+'>'+t+'</option>').join('')+
+  '</select>';
 
-    return [
-      '<tr class="border-b align-top">',
-        '<td class="px-2 py-2 font-mono">', c.code||'', '</td>',
-        '<td class="px-2 py-2">',
-          '<button class="font-medium underline decoration-dotted" data-open="',c.id,'">', c.name ,'</button>',
-          '<div class="text-xs text-slate-500">', (c.contact||''), '</div>',
-        '</td>',
-        '<td class="px-2 py-2">', (c.city||''), ' (', (c.prov||''), ')</td>',
-        '<td class="px-2 py-2">', tierSel ,'</td>',
-        '<td class="px-2 py-2 ', (overdue?'text-red-600 font-semibold':''), '">', fmtDate(c.lastVisitDate) ,'</td>',
-        '<td class="px-2 py-2 text-right whitespace-nowrap">',
-          '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
-          '<button class="btn" data-notes="',c.id,'">Note</button> ',
-          '<button class="btn" data-promo="',c.id,'">Promo</button> ',
-          '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
-        '</td>',
-      '</tr>',
-      // dettaglio espandibile (se aperto)
-      (window._openClientId===c.id ? (
-        '<tr class="bg-slate-50"><td colspan="6" class="px-3 py-3 text-sm">'+[
-          '<div class="grid grid-cols-1 md:grid-cols-3 gap-3">',
-            '<div><div class="text-slate-500 text-xs">Indirizzo</div><div>', c.address||'—','</div></div>',
-            '<div><div class="text-slate-500 text-xs">Email</div><div>', c.email||'—','</div></div>',
-            '<div><div class="text-slate-500 text-xs">Telefono</div><div>', c.phone||'—','</div></div>',
-            '<div><div class="text-slate-500 text-xs">P.IVA</div><div>', c.piva||'—','</div></div>',
-            '<div><div class="text-slate-500 text-xs">Cod. fiscale</div><div>', c.cf||'—','</div></div>',
-            '<div><div class="text-slate-500 text-xs">Pagamento</div><div>', c.paymentDesc||'—','</div></div>',
-            '<div class="md:col-span-3"><div class="text-slate-500 text-xs">Note</div><div>', c.notes||'—','</div></div>',
-          '</div>'
-        ].join('')+'</td></tr>'
-      ):'')
-    ].join('');
-  }
+  return [
+    '<tr class="border-b align-top">',
+      '<td class="px-2 py-2 font-mono">', c.code||'', '</td>',
+      '<td class="px-2 py-2">',
+        // CLIC SUL NOME = APRE/CHIUDI MINI RIASSUNTO
+        '<button class="font-medium underline decoration-dotted" data-open="',c.id,'">', c.name ,'</button>',
+        '<div class="text-xs text-slate-500">', (c.contact||''), '</div>',
+      '</td>',
+      '<td class="px-2 py-2">', (c.city||''), ' (', (c.prov||''), ')</td>',
+      '<td class="px-2 py-2">', tierSel ,'</td>',
+      '<td class="px-2 py-2 ', (overdue?'text-red-600 font-semibold':''), '">', fmtDate(c.lastVisitDate) ,'</td>',
+      '<td class="px-2 py-2 text-right whitespace-nowrap">',
+        '<button class="btn" data-qv="',c.id,'">+ Visita</button> ',
+        '<button class="btn" data-notes="',c.id,'">Note</button> ',
+        '<button class="btn" data-promo="',c.id,'">Promo</button> ',
+        '<button class="btn text-red-600 border-red-300 hover:bg-red-50" data-del="',c.id,'">Elimina</button>',
+      '</td>',
+    '</tr>',
+
+    // MINI RIASSUNTO espandibile + LINK a scheda completa
+    (window._openClientId===c.id ? (
+      '<tr class="bg-slate-50"><td colspan="6" class="px-3 py-3 text-sm">'+[
+        '<div class="grid grid-cols-1 md:grid-cols-3 gap-3">',
+          '<div><div class="text-slate-500 text-xs">Indirizzo</div><div>', c.address||'—','</div></div>',
+          '<div><div class="text-slate-500 text-xs">Email</div><div>', c.email||'—','</div></div>',
+          '<div><div class="text-slate-500 text-xs">Telefono</div><div>', c.phone||'—','</div></div>',
+          '<div><div class="text-slate-500 text-xs">Pagamento</div><div>', c.paymentDesc||'—','</div></div>',
+          '<div><div class="text-slate-500 text-xs">Listino</div><div>', (c.priceCode||'—'),' ', (c.priceDesc||''),'</div></div>',
+          '<div><div class="text-slate-500 text-xs">Note</div><div>', c.notes||'—','</div></div>',
+        '</div>',
+        '<div class="mt-3 flex items-center justify-between">',
+          '<div class="text-xs text-slate-600">Ultima visita: ',(fmtDate(c.lastVisitDate)||'—'),' · Prossima: ',(fmtDate(c.nextVisitDate)||'—'),'</div>',
+          '<div class="space-x-2">',
+            '<button class="btn" data-full="',c.id,'">Anagrafica completa →</button>',
+          '</div>',
+        '</div>'
+      ].join('')+'</td></tr>'
+    ):'')
+  ].join('');
+}
+
 
   function paint(){
     const list=[...filtered()];
@@ -543,13 +553,20 @@ async function ensureFirebaseConnected(){
       window._promoClientPreselect = b.getAttribute('data-promo'); route='promo'; render();
     }));
     
-    // apri scheda cliente in pagina dedicata
-    root.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click', ()=>{
+    // apri/chiudi mini riassunto
+    root.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>{
       const id=b.getAttribute('data-open');
-      window._openClientId = id;
-      route = 'cliente';
+      window._openClientId = (window._openClientId===id ? null : id);
+      paint();
+    }));
+
+    // vai alla scheda completa
+    root.querySelectorAll('[data-full]').forEach(b=>b.addEventListener('click',()=>{
+      window._openClientId = b.getAttribute('data-full');
+      route='cliente';
       render();
     }));
+
 
     // edit tier in linea
     root.querySelectorAll('[data-tier]').forEach(sel=>sel.addEventListener('change',()=>{
@@ -953,6 +970,30 @@ async function ensureFirebaseConnected(){
           '<div class="mt-3 text-right"><button id="exportCSV" class="btn">⬇️ Export CSV cliente×mese</button></div>',
         '</div></div>',
 
+        // === RIEPILOGO ANNUALE ===
+        '<div class="card" id="cardY"><div class="card-h">',
+          '<h3 class="font-semibold">Riepilogo annuale</h3>',
+          '<div class="flex items-center gap-2">',
+          '<select id="yYear" class="border rounded-xl px-3 py-2">', anni.map(y=>'<option '+(y===defYear?'selected':'')+'>'+y+'</option>').join('') ,'</select>',
+        '</div>',
+      '</div>',
+      '<div class="card-b overflow-auto">',
+        '<table class="min-w-full text-sm" id="tableY">',
+          '<thead class="bg-slate-100 text-slate-600"><tr>',
+            '<th class="text-left px-2 py-2 cursor-pointer" data-sorty="name">Cliente</th>',
+            '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="goalY">Obiettivo annuo</th>',
+            '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="amountY">Fatturato anno</th>',
+            '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="deltaYG">Δ vs obiettivo</th>',
+            '<th class="text-right px-2 py-2 cursor-pointer" data-sorty="deltaYoY">Δ YoY</th>',
+          '</tr></thead>',
+          '<tbody id="rowsY"></tbody>',
+        '</table>',
+        '<div class="mt-3 text-right space-x-2">',
+          '<button id="exportCSVY" class="btn">⬇️ Export CSV annuo</button>',
+          '<button id="printY" class="btn">🖨️ Stampa/PDF</button>',
+        '</div>',
+      '</div></div>',
+
         // SETTIMANALE
         (function(){ const lw=lastAvailableWeek(); return [
         '<div class="card"><div class="card-h"><h3 class="font-semibold">Riepilogo settimanale</h3>',
@@ -1061,6 +1102,101 @@ async function ensureFirebaseConnected(){
         saveSortW({key,dir}); paintWeeklyTable();
       }));
     }
+    // stato sort annuo
+let sortY = lsGet('fattSortY', {key:'amountY', dir:'desc'});
+const saveSortY = (s)=>{ sortY=s; lsSet('fattSortY', s); };
+const cmp=(a,b,dir)=> dir==='asc' ? (a>b?1:(a<b?-1:0)) : (a<b?1:(a>b?-1:0));
+
+function yearTotalsForClient(c, Y){
+  const months = [...Array(12)].map((_,i)=> Y+'-'+String(i+1).padStart(2,'0'));
+  const sum = months.reduce((tot,m)=> tot + sales
+    .filter(s=>s.clientId===c.id && s.month===m)
+    .reduce((a,b)=>a+Number(b.amount||0),0), 0);
+  const goalY = Number(c.goalMonthly||0) * 12;
+  // YoY
+  const monthsPrev = [...Array(12)].map((_,i)=> (Y-1)+'-'+String(i+1).padStart(2,'0'));
+  const sumPrev = monthsPrev.reduce((tot,m)=> tot + sales
+    .filter(s=>s.clientId===c.id && s.month===m)
+    .reduce((a,b)=>a+Number(b.amount||0),0), 0);
+  return { id:c.id, name:c.name, goalY, amountY:sum, deltaYG:(sum-goalY), deltaYoY:(sum-sumPrev) };
+}
+
+function paintYearlyTable(){
+  const Y = Number(document.getElementById('yYear').value);
+  const data = getClients().map(c=>yearTotalsForClient(c, Y)).sort((A,B)=>{
+    const k=sortY.key, d=sortY.dir;
+    if(k==='name')    return cmp((A.name||'').toLowerCase(), (B.name||'').toLowerCase(), d);
+    if(k==='goalY')   return cmp(A.goalY,   B.goalY,   d);
+    if(k==='amountY') return cmp(A.amountY, B.amountY, d);
+    if(k==='deltaYG') return cmp(A.deltaYG, B.deltaYG, d);
+    if(k==='deltaYoY')return cmp(A.deltaYoY,B.deltaYoY,d);
+    return 0;
+  });
+
+  document.getElementById('rowsY').innerHTML = data.map(r=>{
+    const clsG = r.deltaYG<0?'text-red-600':(r.deltaYG>0?'text-emerald-600':'');
+    const clsY = r.deltaYoY<0?'text-red-600':(r.deltaYoY>0?'text-emerald-600':'');
+    const sgnG = r.deltaYG>0?'+':'';
+    const sgnY = r.deltaYoY>0?'+':'';
+    return [
+      '<tr class="border-b">',
+        '<td class="px-2 py-2">', r.name ,'</td>',
+        '<td class="px-2 py-2 text-right">', r.goalY?fmtEuro(r.goalY):'—' ,'</td>',
+        '<td class="px-2 py-2 text-right">', fmtEuro(r.amountY) ,'</td>',
+        '<td class="px-2 py-2 text-right ',clsG,'">', sgnG, fmtEuro(r.deltaYG) ,'</td>',
+        '<td class="px-2 py-2 text-right ',clsY,'">', sgnY, fmtEuro(r.deltaYoY) ,'</td>',
+      '</tr>'
+    ].join('');
+  }).join('');
+
+  // click sulle intestazioni per sort
+  document.querySelectorAll('[data-sorty]').forEach(th=>th.addEventListener('click', ()=>{
+    const key=th.getAttribute('data-sorty');
+    const dir=(sortY.key===key && sortY.dir==='asc')?'desc':'asc';
+    saveSortY({key,dir}); paintYearlyTable();
+  }));
+}
+
+// Export CSV annuale
+function exportYearCSV(){
+  const Y = Number(document.getElementById('yYear').value);
+  const rows=[['client_code','client_name','year','amount','annual_goal','delta_vs_goal','delta_yoy']];
+  const mapName=Object.fromEntries(getClients().map(c=>[c.id,c.name]));
+  const mapCode=Object.fromEntries(getClients().map(c=>[c.id,c.code||'']));
+  getClients().forEach(c=>{
+    const t=yearTotalsForClient(c,Y);
+    rows.push([mapCode[c.id]||'', mapName[c.id]||'', String(Y), String(t.amountY||0), String(t.goalY||0), String(t.deltaYG||0), String(t.deltaYoY||0)]);
+  });
+  const csv=rows.map(r=>r.map(v=>String(v).includes(',')?('"' + String(v).replace(/"/g,'""') + '"'):v).join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='fatturato_annuale_'+Y+'.csv'; a.click();
+}
+
+// Stampa/PDF (anche da smartphone)
+function printSection(sectionId, title){
+  const node = document.getElementById(sectionId);
+  if(!node){ alert('Sezione non trovata'); return; }
+  const w = window.open('', '_blank');
+  w.document.write(`
+    <html><head>
+      <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>${title||'Report'}</title>
+      <style>
+        body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;color:#0f172a}
+        h1{font-size:18px;margin:0 0 12px 0}
+        table{width:100%;border-collapse:collapse;font-size:12px}
+        th,td{border:1px solid #e2e8f0;padding:6px 8px;text-align:right}
+        th{text-align:left;background:#f1f5f9;color:#475569}
+        td:first-child,th:first-child{text-align:left}
+      </style>
+    </head><body>
+      <h1>${title||'Report'}</h1>
+      ${node.querySelector('table')?.outerHTML || node.innerHTML}
+    </body></html>
+  `);
+  w.document.close();
+  w.focus();
+  w.print(); // su smartphone puoi salvare come PDF
+}
 
     // ---------- Grafici ----------
     function paintClientChart(){
@@ -1080,6 +1216,7 @@ async function ensureFirebaseConnected(){
     // init + handlers
     paintMonthlyTable();
     paintWeeklyTable();
+    paintYearlyTable();
     paintClientChart();
     paintTotalChart();
 
@@ -1089,6 +1226,10 @@ async function ensureFirebaseConnected(){
     document.getElementById('wWeek').addEventListener('change', paintWeeklyTable);
     document.getElementById('selClient').addEventListener('change', paintClientChart);
     document.getElementById('yearYTD').addEventListener('change', paintClientChart);
+    document.getElementById('yYear').addEventListener('change', paintYearlyTable);
+    document.getElementById('exportCSVY').addEventListener('click', exportYearCSV);
+    document.getElementById('printY').addEventListener('click', ()=>printSection('cardY','Riepilogo annuale'));
+
 
     // Import CSV (unico listener)
     document.getElementById('doImport').addEventListener('click', async ()=>{
