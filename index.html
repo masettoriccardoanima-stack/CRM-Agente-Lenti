@@ -69,6 +69,22 @@
 
     /* ============== Firebase helpers (single, canonical) ============== */
 
+async function loadFirebaseCDN(){
+  if (window.firebase && window.firebase.apps) return;
+  const urls = [
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js',
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js'
+  ];
+  for (const src of urls){
+    await new Promise((res, rej)=>{
+      const s=document.createElement('script');
+      s.src=src; s.onload=res; s.onerror=()=>rej(new Error('Load fail '+src));
+      document.head.appendChild(s);
+    });
+  }
+}
+
 async function ensureFirebaseConnected(){
   const fb = getFB();
   if(!fb.enabled || !fb.config || !fb.agentId) return false;
@@ -93,8 +109,8 @@ async function ensureFirebaseConnected(){
 }
 /* ============== fine Firebase helpers ============== */
 
-// === Defaults (unico, sicuro anche se ricaricato) ===
-var DEF_SETTINGS = window.DEF_SETTINGS || {
+/* === Defaults (idempotente, zero redeclare) === */
+window.DEF_SETTINGS = window.DEF_SETTINGS || {
   agencyName: 'Marinelli Optodinamica – Agente',
   agentName: 'Agente Demo',
   baseCity: 'Padova',
@@ -103,11 +119,10 @@ var DEF_SETTINGS = window.DEF_SETTINGS || {
   freqNew: 21,
   annualGoal: 130000
 };
-window.DEF_SETTINGS = DEF_SETTINGS;
-
-// Alias retrocompatibile (se qualche punto usa ancora DEFAULT_SETTINGS)
-var DEFAULT_SETTINGS = window.DEFAULT_SETTINGS || DEF_SETTINGS;
-window.DEFAULT_SETTINGS = DEFAULT_SETTINGS;
+// Alias retrocompatibile per vecchio codice che usa "DEFAULT_SETTINGS"
+if (typeof window.DEFAULT_SETTINGS === 'undefined') {
+  window.DEFAULT_SETTINGS = window.DEF_SETTINGS;
+}
 
 // Compatibilità retro: se qualche punto usa ancora DEFAULT_SETTINGS
 // l'alias evita ReferenceError.
@@ -826,24 +841,56 @@ const DEFAULT_SETTINGS = DEF_SETTINGS;
     }
 
     // ——— Fatturati & Statistiche ———
-    function parseCSV(text){function parseCSV(text){
-  const firstLine = (text.split('\n')[0] || '');
+    function parseCSV(text){
+  if (!text) return { header: [], rows: [] };
+
+  // scegli automaticamente il separatore ; oppure ,
+  const firstLine = (text.split(/\r?\n/)[0] || '');
   const delim = (firstLine.split(';').length > firstLine.split(',').length)
     ? ';'
     : (firstLine.includes(';') ? ';' : ',');
 
-  const rows = text
-    .split(/\r?\n/)
-    .filter(r => r.trim().length)
-    .map(r => r.split(delim));
-
-  return { header: rows[0].map(h => h.trim()), rows: rows.slice(1) };
-}
-      const delim = text.indexOf(';')>-1 && text.indexOf(',')>-1 ? (text.split('\n')[0].split(';').length > text.split('\n')[0].split(',').length ? ';' : ',') : (text.indexOf(';')>-1?';':',');
-      const rows=text.split(/\r?\n/).filter(r=>r.trim().length).map(r=>r.split(delim));
-      return {header:rows[0].map(h=>h.trim()), rows:rows.slice(1)};
+  // parser che rispetta i campi tra "virgolette" (con doppie "" come escape)
+  function parseLine(line, d){
+    const out = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++){
+      const ch = line[i];
+      if (ch === '"'){
+        if (inQuotes && line[i+1] === '"'){ // escape ""
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === d && !inQuotes){
+        out.push(cur);
+        cur = '';
+      } else {
+        cur += ch;
+      }
     }
-    function normalizeAmount(s){ if(s==null) return 0; s=String(s).replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
+    out.push(cur);
+    return out;
+  }
+
+  const lines = text.split(/\r?\n/).filter(r => r.trim().length);
+  if (!lines.length) return { header: [], rows: [] };
+
+  const header = parseLine(lines[0], delim).map(h => h.trim());
+  const rows = lines.slice(1).map(r => parseLine(r, delim));
+
+  return { header, rows };
+}
+
+function normalizeAmount(s){
+  if (s == null) return 0;
+  // rimuove separatori migliaia, cambia virgola in punto, ignora simboli
+  const cleaned = String(s).replace(/[^\d,.\-]/g, '').replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+}
 
     // ================== FATTURATI (unica tabella: Anno oppure Mese) ==================
 function renderFatturati(root){
@@ -1587,7 +1634,7 @@ function renderAgenda(root){
           document.getElementById('fbStatus').textContent='Stato: upload in corso...';
           const fb=getFB();
           const docRef=window._fbDB.collection('agents').doc(fb.agentId).collection('data').doc('v1');
-          const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),salesW:getSalesW(),tours:DEFAULT_SETTINGS(),cPromos:getCPromos(),ts:new Date().toISOString()};
+          const payload={settings:getSettings(),clients:getClients(),visits:getVisits(),promos:getPromos(),sales:getSales(),salesW:getSalesW(),tours:getTours(), cPromos:getCPromos(),ts:new Date().toISOString()};
           await docRef.set(payload);
           setSync({lastSyncISO:new Date().toISOString()});
           document.getElementById('fbStatus').textContent='Stato: upload completato';
