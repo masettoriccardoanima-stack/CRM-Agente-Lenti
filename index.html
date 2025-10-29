@@ -68,24 +68,6 @@
     }
 
     /* ============== Firebase helpers (single, canonical) ============== */
-function loadFirebaseCDN(){
-  if(window.firebase) return Promise.resolve();
-  const urls = [
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js',
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js'
-  ];
-  let loaded = 0;
-  return new Promise((resolve, reject)=>{
-    urls.forEach(u=>{
-      const s = document.createElement('script');
-      s.src = u; s.async = true;
-      s.onload = ()=>{ if(++loaded === urls.length) resolve(); };
-      s.onerror = ()=>reject(new Error('Errore caricamento SDK: '+u));
-      document.head.appendChild(s);
-    });
-  });
-}
 
 async function ensureFirebaseConnected(){
   const fb = getFB();
@@ -111,18 +93,29 @@ async function ensureFirebaseConnected(){
 }
 /* ============== fine Firebase helpers ============== */
 
+// === Defaults (unico, sicuro anche se ricaricato) ===
+var DEF_SETTINGS = window.DEF_SETTINGS || {
+  agencyName: 'Marinelli Optodinamica – Agente',
+  agentName: 'Agente Demo',
+  baseCity: 'Padova',
+  freqStandard: 90,
+  freqImportant: 30,
+  freqNew: 21,
+  annualGoal: 130000
+};
+window.DEF_SETTINGS = DEF_SETTINGS;
 
-    // ——— Seeds ———
-    const DEF_SETTINGS = {
-      agencyName:'Marinelli Optodinamica – Agente',
-      agentName:'Agente Demo',
-      baseCity:'Padova',
-      freqStandard:90,
-      freqImportant:30,
-      freqNew:21,
-      annualGoal:130000
-    };
+// Alias retrocompatibile (se qualche punto usa ancora DEFAULT_SETTINGS)
+var DEFAULT_SETTINGS = window.DEFAULT_SETTINGS || DEF_SETTINGS;
+window.DEFAULT_SETTINGS = DEFAULT_SETTINGS;
+
+// Compatibilità retro: se qualche punto usa ancora DEFAULT_SETTINGS
+// l'alias evita ReferenceError.
+const DEFAULT_SETTINGS = DEF_SETTINGS;
+
+    
     const TRIVENETO={ 'Veneto':['PD','VE','TV','VI','VR','RO','BL'], 'Trentino-Alto Adige/Südtirol':['TN','BZ'], 'Friuli Venezia Giulia':['TS','GO','PN','UD'] };
+    
     function ensureSeeds(){
       if(!lsGet('settings')) lsSet('settings', DEF_SETTINGS);
       if(!lsGet('clients')?.length) lsSet('clients',[
