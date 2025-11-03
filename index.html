@@ -680,21 +680,66 @@ const DEFAULT_SETTINGS = DEF_SETTINGS;
       const f=root.querySelector('#fVisit'); f.addEventListener('submit',e=>{e.preventDefault(); const data=Object.fromEntries(new FormData(f).entries()); const id=nextId('V'); const v={id,...data}; visits.unshift(v); setVisits(visits);
         const s=getSettings(); const all=getClients(); const c=all.find(x=>x.id===data.clientId); if(c){ const next=data.nextDate||addDays(data.date,tierToFreq(c.tier||'standard',s)); c.lastVisitDate=data.date; c.nextVisitDate=next; setClients(all); } repaint(); f.reset(); });
       // Dettatura note
-      const btnDict = root.querySelector('#dictate');
-      if(btnDict){
-        btnDict.addEventListener('click', ()=>{
-          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-          if(!SpeechRecognition){ alert('Dettatura non supportata su questo browser'); return; }
-          const r = new SpeechRecognition();
-          r.lang = 'it-IT'; r.interimResults = false; r.maxAlternatives = 1;
-          r.onresult = (e)=>{
-            const txt = e.results[0][0].transcript || '';
-            const notes = root.querySelector('input[name="notes"]');
-            notes.value = (notes.value? (notes.value+' ') : '') + txt;
-          };
-          r.onerror = (e)=> alert('Errore dettatura: '+(e.error||'')); r.start();
-        });
+      // Dettatura note (compat mobile, con fallback)
+const btnDict = root.querySelector('#dictate');
+if (btnDict) {
+  let sr = null;
+  let listening = false;
+
+  const startSR = () => {
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    // Fallback: iOS/Safari non supporta SpeechRecognition
+    if (!SpeechRec) {
+      const notes = root.querySelector('input[name="notes"]');
+      if (notes) notes.focus();
+      alert('Dettatura non supportata su questo browser. Usa il microfono della tastiera per dettare nel campo Note.');
+      return;
+    }
+
+    sr = new SpeechRec();
+    sr.lang = 'it-IT';
+    sr.interimResults = false;   // solo testo finale per evitare duplicati
+    sr.maxAlternatives = 1;
+    sr.continuous = false;
+
+    const notes = root.querySelector('input[name="notes"]');
+
+    btnDict.disabled = true;
+    btnDict.textContent = '🎤 In ascolto…';
+
+    sr.onresult = (e) => {
+      try {
+        const text = e.results[0][0].transcript || '';
+        if (notes) notes.value = (notes.value ? notes.value + ' ' : '') + text;
+      } catch {}
+    };
+
+    sr.onerror = (e) => {
+      const code = e.error || '';
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        alert('Permesso microfono negato. Abilitalo nelle impostazioni del browser.');
+      } else if (code === 'no-speech') {
+        alert('Non ho sentito nulla. Riprova parlando vicino al microfono.');
+      } else {
+        alert('Errore dettatura: ' + code);
       }
+    };
+
+    sr.onend = () => {
+      listening = false;
+      btnDict.disabled = false;
+      btnDict.textContent = '🎤 Dettatura';
+    };
+
+    try { sr.start(); listening = true; } catch {}
+  };
+
+  btnDict.addEventListener('click', () => {
+    if (listening && sr) { try { sr.stop(); } catch {} return; }
+    startSR();
+  });
+}
     }
 
     // ——— Promozioni ———
